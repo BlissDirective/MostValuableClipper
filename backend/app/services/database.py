@@ -70,6 +70,56 @@ class SupabaseService:
         return result.data if result.data else []
     
     @staticmethod
+    async def get_source(source_id: str) -> Optional[Dict[str, Any]]:
+        """Get a source by ID."""
+        result = supabase.table("sources").select("*").eq("id", source_id).single().execute()
+        return result.data if result.data else None
+    
+    @staticmethod
+    async def get_pipeline(pipeline_id: str) -> Optional[Dict[str, Any]]:
+        """Get a pipeline by ID."""
+        result = supabase.table("pipelines").select("*").eq("id", pipeline_id).single().execute()
+        return result.data if result.data else None
+    
+    @staticmethod
+    async def update_pipeline(pipeline_id: str, update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update a pipeline."""
+        result = supabase.table("pipelines").update(update_data).eq("id", pipeline_id).execute()
+        return result.data[0] if result.data else {}
+    
+    @staticmethod
+    async def delete_pipeline(pipeline_id: str) -> bool:
+        """Delete a pipeline."""
+        result = supabase.table("pipelines").delete().eq("id", pipeline_id).execute()
+        return len(result.data) > 0 if result.data else False
+    
+    @staticmethod
+    async def get_clip(clip_id: str) -> Optional[Dict[str, Any]]:
+        """Get a clip by ID."""
+        result = supabase.table("clips").select("*").eq("id", clip_id).single().execute()
+        return result.data if result.data else None
+    
+    @staticmethod
+    async def delete_clip(clip_id: str) -> bool:
+        """Delete a clip."""
+        result = supabase.table("clips").delete().eq("id", clip_id).execute()
+        return len(result.data) > 0 if result.data else False
+    
+    @staticmethod
+    async def get_clips_for_posting(
+        status: str = "approved",
+        scheduled_before: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get clips ready for posting."""
+        query = supabase.table("clips").select("*").eq("status", status)
+        
+        if scheduled_before:
+            query = query.lte("scheduled_post_time", scheduled_before)
+        
+        result = query.execute()
+        return result.data if result.data else []
+    
+    @staticmethod
     async def update_earnings(earnings_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create or update earnings record."""
         result = supabase.table("earnings").upsert(earnings_data).execute()

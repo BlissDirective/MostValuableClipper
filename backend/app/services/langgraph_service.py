@@ -94,19 +94,35 @@ class ClipProcessingPipeline:
         
         try:
             # Get source info from database
-            # source = await self.db.get_source(state["source_id"])
-            # For now, assume we have the video URL
+            source = await self.db.get_source(state["source_id"])
+            
+            if not source:
+                raise Exception(f"Source {state['source_id']} not found")
+            
+            source_url = source.get("source_url")
+            source_type = source.get("source_type", "youtube")
+            
+            if not source_url:
+                raise Exception(f"Source {state['source_id']} has no URL")
             
             # Create temp directory for processing
             temp_dir = tempfile.mkdtemp(prefix=f"clip_{state['clip_id']}_")
             video_path = os.path.join(temp_dir, "source.mp4")
             
-            # TODO: Get actual source URL from database
-            # For demo, create a placeholder
+            # Download the video
+            if source_type == "youtube":
+                await self.video_service.download_youtube(source_url, video_path)
+            elif source_type in ["direct_url", "rss"]:
+                await self.video_service.download_direct(source_url, video_path)
+            else:
+                raise Exception(f"Unsupported source type: {source_type}")
+            
             state["video_path"] = video_path
             state["metadata"]["temp_dir"] = temp_dir
+            state["metadata"]["source_url"] = source_url
+            state["metadata"]["source_type"] = source_type
             
-            logger.info(f"[Pipeline] Video path: {video_path}")
+            logger.info(f"[Pipeline] Video downloaded: {video_path}")
         except Exception as e:
             logger.error(f"[Pipeline] Download failed: {e}")
             state["error"] = str(e)
@@ -268,7 +284,7 @@ class ClipProcessingPipeline:
         return state
     
     async def _enrich_content(self, state: ClipProcessingState) -> ClipProcessingState:
-        """Generate captions, hashtags, and titles."""
+        """Generate captions, hashtags, and titles using pipeline config."""
         if state.get("error"):
             return state
         
@@ -278,24 +294,39 @@ class ClipProcessingPipeline:
         try:
             text = state["transcription"].get("text", "")
             
+            # Fetch pipeline config for niche/platform
+            niche = "general"
+            platform = "tiktok"
+            try:
+                pipeline = await self.db.get_pipeline(state["pipeline_id"])
+                if pipeline:
+                    niche = pipeline.get("niche", "general")
+                    target_platforms = pipeline.get("target_platforms", ["tiktok"])
+                    platform = target_platforms[0] if target_platforms else "tiktok"
+            except Exception as e:
+                logger.warning(f"[Pipeline] Could not fetch pipeline config, using defaults: {e}")
+            
+            state["metadata"]["niche"] = niche
+            state["metadata"]["platform"] = platform
+            
             # Generate title
             title = await self.enrichment_service.generate_title(
                 transcript=text,
-                niche="general"  # TODO: Get from pipeline config
+                niche=niche
             )
             
             # Generate caption
             caption = await self.enrichment_service.generate_caption(
                 transcript=text,
-                niche="general",
-                platform="tiktok"
+                niche=niche,
+                platform=platform
             )
             
             # Generate hashtags
             hashtags = await self.enrichment_service.generate_hashtags(
                 transcript=text,
-                niche="general",
-                platform="tiktok",
+                niche=niche,
+                platform=platform,
                 count=5
             )
             
@@ -308,7 +339,7 @@ class ClipProcessingPipeline:
             logger.error(f"[Pipeline] Content enrichment failed: {e}")
             # Don't fail pipeline - use fallbacks
             state["metadata"]["title"] = "Untitled Clip"
-            state["metadata"]["caption"] = text[:150]
+            state["metadata"]["caption"] = text[:150] if text else ""
             state["metadata"]["hashtags"] = ["#content", "#viral"]
         
         return state

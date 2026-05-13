@@ -2,8 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 from pydantic import BaseModel
 
+from app.models import (
+    Clip, ClipCreate, ClipUpdate, ClipStatus,
+    Platform, PlatformPost
+)
+from app.services.auth import get_current_user
 from app.services.database import SupabaseService
 from app.services.queue import QueueService
+from app.services.scheduler import PostScheduler
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
@@ -17,8 +23,15 @@ class ClipActionRequest(BaseModel):
     action: str  # "approve", "reject", "retry", "delete"
     reason: Optional[str] = None
 
+class ScheduleRequest(BaseModel):
+    post_time: str  # ISO 8601
+
+class PostRequest(BaseModel):
+    platforms: List[Platform]
+
 db = SupabaseService()
 queue = QueueService()
+scheduler = PostScheduler()
 
 @router.get("", response_model=ClipListResponse)
 async def list_clips(
@@ -38,7 +51,6 @@ async def list_clips(
             offset=(page - 1) * page_size
         )
         
-        # Get total count (simplified - in production would query count)
         total = len(clips)  # Placeholder
         
         return ClipListResponse(
@@ -73,14 +85,12 @@ async def create_clip(
 ):
     """Create a new clip and queue it for processing."""
     try:
-        # Create clip in database
         clip_data = clip.model_dump()
         clip_data["user_id"] = user.id
         clip_data["status"] = "queued"
         
         created = await db.create_clip(clip_data)
         
-        # Queue for processing
         await queue.enqueue("clip_generation", {
             "job_id": created["id"],
             "clip_id": created["id"],
@@ -100,9 +110,10 @@ async def get_clip(
 ):
     """Get a specific clip by ID."""
     try:
-        # Query Supabase for clip
-        # For now, return a placeholder
-        raise HTTPException(status_code=404, detail="Clip not found")
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        return clip
     except HTTPException:
         raise
     except Exception as e:
@@ -121,6 +132,34 @@ async def update_clip(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update clip: {str(e)}")
 
+@router.post("/{clip_id}/approve")
+async def approve_clip(
+    clip_id: str,
+    user = Depends(get_current_user)
+):
+    """Approve a clip for posting."""
+    try:
+        await db.update_clip(clip_id, {"status": "approved"})
+        return {"success": True, "clip_id": clip_id, "status": "approved"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Approve failed: {str(e)}")
+
+@router.post("/{clip_id}/reject")
+async def reject_clip(
+    clip_id: str,
+    reason: Optional[str] = None,
+    user = Depends(get_current_user)
+):
+    """Reject a clip."""
+    try:
+        await db.update_clip(clip_id, {
+            "status": "rejected",
+            "rejection_reason": reason
+        })
+        return {"success": True, "clip_id": clip_id, "status": "rejected"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reject failed: {str(e)}")
+
 @router.post("/{clip_id}/action")
 async def clip_action(
     clip_id: str,
@@ -138,8 +177,7 @@ async def clip_action(
             })
         elif action.action == "retry":
             await db.update_clip(clip_id, {"status": "queued"})
-            # Re-queue for processing
-            clip = await db.get_clip(clip_id)  # This method needs to be added
+            clip = await db.get_clip(clip_id)
             if clip:
                 await queue.enqueue("clip_generation", {
                     "job_id": clip_id,
@@ -149,28 +187,56 @@ async def clip_action(
                     "user_id": user.id
                 })
         elif action.action == "delete":
-            # TODO: Implement delete in database service
-            pass
+            await db.delete_clip(clip_id)
         
         return {"success": True, "clip_id": clip_id, "action": action.action}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Action failed: {str(e)}")
 
+@router.patch("/{clip_id}/schedule")
+async def schedule_clip(
+    clip_id: str,
+    request: ScheduleRequest,
+    user = Depends(get_current_user)
+):
+    """Schedule a clip for posting at a specific time."""
+    try:
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        
+        result = await scheduler.schedule_clip(
+            clip_id=clip_id,
+            pipeline_id=clip["pipeline_id"],
+            post_time=request.post_time
+        )
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schedule failed: {str(e)}")
+
 @router.post("/{clip_id}/post")
 async def post_clip(
     clip_id: str,
-    platforms: List[Platform],
+    request: PostRequest,
     user = Depends(get_current_user)
 ):
-    """Post an approved clip to selected platforms."""
+    """Post an approved clip to selected platforms immediately."""
     try:
-        # TODO: Get clip details and post to each platform
-        # This requires social platform OAuth tokens
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        
+        # TODO: Get social platform access tokens and post
         return {
             "success": True,
             "clip_id": clip_id,
-            "platforms": platforms,
+            "platforms": request.platforms,
             "note": "Social posting requires platform OAuth setup"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Post failed: {str(e)}")
