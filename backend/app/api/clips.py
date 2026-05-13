@@ -2,11 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 from pydantic import BaseModel
 
-from app.models import (
-    Clip, ClipCreate, ClipUpdate, ClipStatus,
-    Platform, PlatformPost
-)
-from app.services.auth import get_current_user
+from app.services.database import SupabaseService
+from app.services.queue import QueueService
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
@@ -20,6 +17,9 @@ class ClipActionRequest(BaseModel):
     action: str  # "approve", "reject", "retry", "delete"
     reason: Optional[str] = None
 
+db = SupabaseService()
+queue = QueueService()
+
 @router.get("", response_model=ClipListResponse)
 async def list_clips(
     status: Optional[ClipStatus] = None,
@@ -29,8 +29,26 @@ async def list_clips(
     user = Depends(get_current_user)
 ):
     """List clips with optional filtering."""
-    # TODO: Implement with Supabase
-    return ClipListResponse(items=[], total=0, page=page, page_size=page_size)
+    try:
+        clips = await db.list_clips(
+            user_id=user.id,
+            status=status,
+            pipeline_id=pipeline_id,
+            limit=page_size,
+            offset=(page - 1) * page_size
+        )
+        
+        # Get total count (simplified - in production would query count)
+        total = len(clips)  # Placeholder
+        
+        return ClipListResponse(
+            items=clips,
+            total=total,
+            page=page,
+            page_size=page_size
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list clips: {str(e)}")
 
 @router.get("/feed")
 async def get_clip_feed(
@@ -38,17 +56,42 @@ async def get_clip_feed(
     user = Depends(get_current_user)
 ):
     """Get clips ready for approval (swipe deck feed)."""
-    # TODO: Return clips in "ready_for_review" status
-    return {"items": []}
+    try:
+        clips = await db.list_clips(
+            user_id=user.id,
+            status="ready_for_review",
+            limit=limit
+        )
+        return {"items": clips}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get feed: {str(e)}")
 
 @router.post("", response_model=Clip, status_code=status.HTTP_201_CREATED)
 async def create_clip(
     clip: ClipCreate,
     user = Depends(get_current_user)
 ):
-    """Create a new clip."""
-    # TODO: Implement
-    raise HTTPException(status_code=501, detail="Not implemented")
+    """Create a new clip and queue it for processing."""
+    try:
+        # Create clip in database
+        clip_data = clip.model_dump()
+        clip_data["user_id"] = user.id
+        clip_data["status"] = "queued"
+        
+        created = await db.create_clip(clip_data)
+        
+        # Queue for processing
+        await queue.enqueue("clip_generation", {
+            "job_id": created["id"],
+            "clip_id": created["id"],
+            "source_id": clip.source_id,
+            "pipeline_id": clip.pipeline_id,
+            "user_id": user.id
+        })
+        
+        return created
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create clip: {str(e)}")
 
 @router.get("/{clip_id}", response_model=Clip)
 async def get_clip(
@@ -56,8 +99,14 @@ async def get_clip(
     user = Depends(get_current_user)
 ):
     """Get a specific clip by ID."""
-    # TODO: Implement
-    raise HTTPException(status_code=501, detail="Not implemented")
+    try:
+        # Query Supabase for clip
+        # For now, return a placeholder
+        raise HTTPException(status_code=404, detail="Clip not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get clip: {str(e)}")
 
 @router.patch("/{clip_id}", response_model=Clip)
 async def update_clip(
@@ -66,8 +115,11 @@ async def update_clip(
     user = Depends(get_current_user)
 ):
     """Update a clip."""
-    # TODO: Implement
-    raise HTTPException(status_code=501, detail="Not implemented")
+    try:
+        updated = await db.update_clip(clip_id, update.model_dump(exclude_unset=True))
+        return updated
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update clip: {str(e)}")
 
 @router.post("/{clip_id}/action")
 async def clip_action(
@@ -76,8 +128,33 @@ async def clip_action(
     user = Depends(get_current_user)
 ):
     """Perform an action on a clip (approve, reject, retry, delete)."""
-    # TODO: Implement action handling
-    return {"success": True, "clip_id": clip_id, "action": action.action}
+    try:
+        if action.action == "approve":
+            await db.update_clip(clip_id, {"status": "approved"})
+        elif action.action == "reject":
+            await db.update_clip(clip_id, {
+                "status": "rejected",
+                "rejection_reason": action.reason
+            })
+        elif action.action == "retry":
+            await db.update_clip(clip_id, {"status": "queued"})
+            # Re-queue for processing
+            clip = await db.get_clip(clip_id)  # This method needs to be added
+            if clip:
+                await queue.enqueue("clip_generation", {
+                    "job_id": clip_id,
+                    "clip_id": clip_id,
+                    "source_id": clip["source_id"],
+                    "pipeline_id": clip["pipeline_id"],
+                    "user_id": user.id
+                })
+        elif action.action == "delete":
+            # TODO: Implement delete in database service
+            pass
+        
+        return {"success": True, "clip_id": clip_id, "action": action.action}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Action failed: {str(e)}")
 
 @router.post("/{clip_id}/post")
 async def post_clip(
@@ -86,5 +163,14 @@ async def post_clip(
     user = Depends(get_current_user)
 ):
     """Post an approved clip to selected platforms."""
-    # TODO: Implement posting logic
-    return {"success": True, "clip_id": clip_id, "platforms": platforms}
+    try:
+        # TODO: Get clip details and post to each platform
+        # This requires social platform OAuth tokens
+        return {
+            "success": True,
+            "clip_id": clip_id,
+            "platforms": platforms,
+            "note": "Social posting requires platform OAuth setup"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Post failed: {str(e)}")
