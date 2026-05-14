@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     CLOUDFLARE_ACCOUNT_ID: str = ""
     CLOUDFLARE_R2_ACCESS_KEY_ID: str = ""
     CLOUDFLARE_R2_SECRET_ACCESS_KEY: str = ""
+    CLOUDFLARE_R2_API_TOKEN: Optional[str] = None  # Alternative to S3-style keys
     CLOUDFLARE_R2_BUCKET: str = "mvc-clips"
     CLOUDFLARE_R2_ENDPOINT: str = ""
     
