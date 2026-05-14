@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS public.clips (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     pipeline_id UUID REFERENCES public.pipelines(id) ON DELETE SET NULL,
-    source_id UUID REFERENCES public.sources(id) ON DELETE SET NULL,
+    source_id UUID,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'queued', 'generating', 'ready_for_review', 'approved', 'posted', 'rejected', 'failed')),
     caption TEXT,
     description TEXT,
@@ -137,6 +137,10 @@ CREATE TABLE IF NOT EXISTS public.sources (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add clips foreign key to sources (must be after sources table exists)
+ALTER TABLE public.clips ADD CONSTRAINT fk_clips_source
+    FOREIGN KEY (source_id) REFERENCES public.sources(id) ON DELETE SET NULL;
 
 -- ============================================
 -- PLATFORM POSTS (Individual platform postings)
