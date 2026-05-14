@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     
     # Stripe
     STRIPE_PUBLISHABLE_KEY: str = ""
-    STRIPE_SECRET_KEY: str = ""
+    STRIPE_SECRET_KEY: str = ""  # Live or test depending on env
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PRICE_BASIC: str = ""
     STRIPE_PRICE_PRO: str = ""
