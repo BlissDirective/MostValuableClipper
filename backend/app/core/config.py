@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     SENTRY_DSN_FRONTEND: Optional[str] = None
     
     # ============================================
+    # GitHub (Repo Access + Actions)
+    # ============================================
+    GITHUB_TOKEN: Optional[str] = None
+    
+    # ============================================
     # Fly.io
     # ============================================
     FLY_APP_NAME: Optional[str] = None
