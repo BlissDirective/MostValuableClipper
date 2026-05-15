@@ -83,6 +83,22 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Legal</Text>
+        <TouchableOpacity style={styles.buttonRow} onPress={() => router.push('/legal?tab=privacy')}>
+          <Text style={styles.buttonLabel}>Privacy Policy</Text>
+          <Text style={styles.chevron}>›</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.buttonRow} onPress={() => router.push('/legal?tab=terms')}>
+          <Text style={styles.buttonLabel}>Terms of Service</Text>
+          <Text style={styles.chevron}>›</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.buttonRow} onPress={() => router.push('/legal?tab=dmca')}>
+          <Text style={styles.buttonLabel}>DMCA / Copyright</Text>
+          <Text style={styles.chevron}>›</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Danger Zone</Text>
         <TouchableOpacity style={[styles.buttonRow, styles.danger]} onPress={handleLogout}>
           <Text style={[styles.buttonLabel, styles.dangerText]}>Log Out</Text>

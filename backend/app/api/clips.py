@@ -10,6 +10,8 @@ from app.services.auth import get_current_user
 from app.services.database import SupabaseService
 from app.services.queue import QueueService
 from app.services.scheduler import PostScheduler
+from app.services.r2_service import R2Service
+from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
@@ -32,6 +34,7 @@ class PostRequest(BaseModel):
 db = SupabaseService()
 queue = QueueService()
 scheduler = PostScheduler()
+r2 = R2Service()
 
 @router.get("", response_model=ClipListResponse)
 async def list_clips(
@@ -240,3 +243,46 @@ async def post_clip(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Post failed: {str(e)}")
+
+@router.post("/{clip_id}/download-url")
+async def get_download_url(
+    clip_id: str,
+    user = Depends(get_current_user)
+):
+    """Generate a presigned R2 URL for downloading a clip.
+    
+    The URL expires in 5 minutes and forces Content-Disposition: attachment
+    so the device treats it as a download, not inline playback.
+    """
+    try:
+        # Verify ownership
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to download this clip")
+        
+        if clip.get("status") not in ("rendered", "approved", "posted"):
+            raise HTTPException(status_code=400, detail="Clip is not ready for download")
+        
+        # Build R2 key — follows storage convention: /clips/{clip_id}.mp4
+        key = f"clips/{clip_id}.mp4"
+        
+        # Generate presigned URL with attachment disposition
+        url = await r2.get_presigned_download_url(
+            key=key,
+            expires_in=300,  # 5 minutes
+            filename=f"blissclip_{clip_id}.mp4"
+        )
+        
+        return {
+            "url": url,
+            "expires_at": (datetime.utcnow() + timedelta(seconds=300)).isoformat(),
+            "filename": f"blissclip_{clip_id}.mp4",
+            "content_type": "video/mp4",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {str(e)}")

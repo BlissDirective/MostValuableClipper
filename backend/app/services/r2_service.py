@@ -90,14 +90,31 @@ class R2Service:
         except Exception:
             return False
     
-    async def get_presigned_url(self, key: str, expires_in: int = 3600) -> str:
-        """Get a presigned URL for a file."""
+    async def get_presigned_download_url(
+        self,
+        key: str,
+        expires_in: int = 3600,
+        filename: Optional[str] = None
+    ) -> str:
+        """Get a presigned URL that forces download (Content-Disposition: attachment).
+        
+        Args:
+            key: R2 object key
+            expires_in: URL validity in seconds
+            filename: Suggested filename for the download
+        """
         if not self._use_s3:
             raise RuntimeError("R2 not configured: need S3 keys or API token")
         
+        params = {
+            "Bucket": self.bucket,
+            "Key": key,
+            "ResponseContentDisposition": f'attachment; filename="{filename or key.split("/")[-1]}"',
+        }
+        
         url = self.client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self.bucket, "Key": key},
+            Params=params,
             ExpiresIn=expires_in
         )
         return url

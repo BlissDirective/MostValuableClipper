@@ -13,3 +13,4 @@ export { AddSourceScreen } from './AddSourceScreen';
 export { SocialAccountsScreen } from './SocialAccountsScreen';
 export { EarningsScreen } from './EarningsScreen';
 export { OnboardingScreen } from './OnboardingScreen';
+export { LegalScreen } from './LegalScreen';

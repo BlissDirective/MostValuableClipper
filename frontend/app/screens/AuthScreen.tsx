@@ -10,6 +10,7 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -51,6 +52,10 @@ export default function AuthScreen() {
     }
     if (password.length < 8) {
       Alert.alert('Error', 'Password must be at least 8 characters');
+      return;
+    }
+    if (!agreedToTerms) {
+      Alert.alert('Agreement Required', 'Please agree to the Terms of Service and Privacy Policy to continue.');
       return;
     }
     setLoading(true);
@@ -105,6 +110,27 @@ export default function AuthScreen() {
           secureTextEntry
         />
 
+        {mode === 'signup' && (
+          <TouchableOpacity
+            style={styles.termsRow}
+            onPress={() => setAgreedToTerms(!agreedToTerms)}
+          >
+            <View style={[styles.checkbox, agreedToTerms && styles.checkboxChecked]}>
+              {agreedToTerms && <Text style={styles.checkmark}>✓</Text>}
+            </View>
+            <Text style={styles.termsText}>
+              I agree to the{' '}
+              <Text style={styles.termsLink} onPress={() => router.push('/legal?tab=terms')}>
+                Terms of Service
+              </Text>
+              {' '}and{' '}
+              <Text style={styles.termsLink} onPress={() => router.push('/legal?tab=privacy')}>
+                Privacy Policy
+              </Text>
+            </Text>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
           onPress={mode === 'login' ? handleLogin : handleSignup}
@@ -119,7 +145,10 @@ export default function AuthScreen() {
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+        <TouchableOpacity onPress={() => {
+          setMode(mode === 'login' ? 'signup' : 'login');
+          setAgreedToTerms(false);
+        }}>
           <Text style={styles.link}>
             {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
           </Text>
@@ -180,5 +209,39 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
     fontSize: 14,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#6366f1',
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#6366f1',
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    marginTop: 4,
+  },
+  termsText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#888',
+    lineHeight: 18,
+  },
+  termsLink: {
+    color: '#6366f1',
+    fontWeight: '500',
   },
 });

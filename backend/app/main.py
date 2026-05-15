@@ -8,7 +8,7 @@ import logging
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.events import startup_event, shutdown_event
-from app.api import health, users, clips, pipelines, sources, earnings, webhooks, social, analytics
+from app.api import health, users, clips, pipelines, sources, earnings, webhooks, social, analytics, legal
 
 # Setup logging
 setup_logging()
@@ -60,6 +60,18 @@ app.include_router(webhooks.router, prefix="/api/v1", tags=["webhooks"])
 app.include_router(social.router, prefix="/api/v1", tags=["social"])
 app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
 
+# Legal pages (no API prefix - public pages for social platform requirements)
+app.include_router(legal.router, tags=["legal"])
+
 @app.get("/")
 async def root():
-    return {"message": "MVC API", "version": "0.1.0", "docs": "/api/docs"}
+    return {
+        "message": "MVC API", 
+        "version": "0.1.0", 
+        "docs": "/api/docs",
+        "legal": {
+            "privacy": "/privacy",
+            "terms": "/terms",
+            "dmca": "/dmca"
+        }
+    }
