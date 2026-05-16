@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   ListRenderItem,
@@ -13,6 +13,7 @@ import { CheckCircle2, ChevronRight, Eye, Plus, UserRound, VideoOff } from "luci
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { tokens } from "@/constants/tokens";
+import { useAuthStore } from "@/lib/store";
 import { ActionButton } from "@/components/ActionButton";
 import { ClipCard, ClipCardData } from "@/components/ClipCard";
 import { MetricChip } from "@/components/MetricChip";
@@ -68,16 +69,43 @@ const PLACEHOLDER_CLIPS: ClipCardData[] = [
 
 export default function HomeScreen() {
   const router = useRouter();
+  const clips = useAuthStore((s) => s.clips);
+  const clipsLoading = useAuthStore((s) => s.clipsLoading);
+  const fetchClips = useAuthStore((s) => s.fetchClips);
+  const approveClip = useAuthStore((s) => s.approveClip);
+  const rejectClip = useAuthStore((s) => s.rejectClip);
+  const deleteClip = useAuthStore((s) => s.deleteClip);
+  const pipelines = useAuthStore((s) => s.pipelines);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [clips] = useState<ClipCardData[]>(PLACEHOLDER_CLIPS);
 
-  const activePipelineCount = useMemo(() => 2, []);
+  const activePipelineCount = useMemo(
+    () => pipelines.filter((p) => p.status === "running").length,
+    [pipelines]
+  );
+
+  const pendingCount = useMemo(
+    () => clips.filter((c) => c.state === "queued" || c.state === "held-safety-warn").length,
+    [clips]
+  );
+
+  const queuedCount = useMemo(
+    () => clips.filter((c) => c.state === "queued").length,
+    [clips]
+  );
+
+  const postedToday = useMemo(
+    () => clips.filter((c) => c.state === "posted").length,
+    [clips]
+  );
+
+  useEffect(() => {
+    fetchClips();
+  }, [fetchClips]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    // CLAUDE_CODE: wire to MonitorAgent feed refresh
-    setTimeout(() => setRefreshing(false), 600);
-  }, []);
+    fetchClips().finally(() => setRefreshing(false));
+  }, [fetchClips]);
 
   const renderItem: ListRenderItem<ClipCardData> = useCallback(
     ({ item }) => (
@@ -86,12 +114,19 @@ export default function HomeScreen() {
         variant="feed"
         onPress={() => router.push(`/clip/${item.id}`)}
         onAction={(actionId) => {
-          console.log("[home] clip action", { id: item.id, actionId });
-          // CLAUDE_CODE: wire to ClipActionService (boost / replicate / kill / discard / review)
+          if (actionId === "approve") {
+            approveClip(item.id);
+          } else if (actionId === "reject") {
+            rejectClip(item.id);
+          } else if (actionId === "delete") {
+            deleteClip(item.id);
+          } else {
+            console.log("[home] clip action", { id: item.id, actionId });
+          }
         }}
       />
     ),
-    [router]
+    [router, approveClip, rejectClip, deleteClip]
   );
 
   return (
@@ -124,13 +159,14 @@ export default function HomeScreen() {
         ListHeaderComponent={
           <View>
             <ApprovalBanner
-              pendingCount={3}
+              pendingCount={pendingCount}
               onPress={() => router.push("/(app)/approval")}
             />
             <StatusStrip
               activePipelineCount={activePipelineCount}
+              queuedCount={queuedCount}
+              postedToday={postedToday}
               onNewPipeline={() => {
-                // CLAUDE_CODE: route exists in Phase 3 — fall back to Pipelines tab for now
                 router.push("/(app)/pipelines");
               }}
             />
@@ -190,18 +226,20 @@ function ApprovalBanner({ pendingCount, onPress }: { pendingCount: number; onPre
 
 interface StatusStripProps {
   activePipelineCount: number;
+  queuedCount: number;
+  postedToday: number;
   onNewPipeline: () => void;
 }
 
-function StatusStrip({ activePipelineCount, onNewPipeline }: StatusStripProps) {
+function StatusStrip({ activePipelineCount, queuedCount, postedToday, onNewPipeline }: StatusStripProps) {
   return (
     <View style={styles.stripWrap}>
       <View style={styles.strip}>
-        <MetricChip label="Queued" value="3" delta="clips" style={styles.stripChip} icon={Eye} />
+        <MetricChip label="Queued" value={String(queuedCount)} delta="clips" style={styles.stripChip} icon={Eye} />
         <MetricChip
           label="Posted today"
-          value="7"
-          delta="+2"
+          value={String(postedToday)}
+          delta="+0"
           variant="positive"
           style={styles.stripChip}
         />
