@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     # ============================================
     # GitHub (Repo Access + Actions)
     # ============================================
-    GITHUB_TOKEN: Optional[str] = None
+    GH_TOKEN: Optional[str] = None
     
     # ============================================
     # Fly.io

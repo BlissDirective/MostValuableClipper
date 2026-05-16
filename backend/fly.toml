@@ -1,4 +1,4 @@
-app = "blissclip-api"
+app = "mvc-backend"
 primary_region = "lax"
 
 [build]
@@ -23,5 +23,5 @@ primary_region = "lax"
   APP_ENV = "production"
 
 [[mounts]]
-  source = "blissclip_data"
+  source = "mvc_backend_data"
   destination = "/data"
