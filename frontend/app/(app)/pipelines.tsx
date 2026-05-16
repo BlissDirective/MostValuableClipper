@@ -1,8 +1,9 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   FlatList,
   ListRenderItem,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -20,9 +21,22 @@ import { triggerHaptic } from "@/utils/haptics";
 export default function PipelinesScreen() {
   const router = useRouter();
   const pipelines = useAuthStore((s) => s.pipelines);
+  const pipelinesLoading = useAuthStore((s) => s.pipelinesLoading);
+  const fetchPipelines = useAuthStore((s) => s.fetchPipelines);
   const updatePipeline = useAuthStore((s) => s.updatePipeline);
   const removePipeline = useAuthStore((s) => s.removePipeline);
+  const [refreshing, setRefreshing] = useState(false);
   const [showEmpty, setShowEmpty] = useState<boolean>(false);
+
+  useEffect(() => {
+    fetchPipelines();
+  }, []);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchPipelines();
+    setRefreshing(false);
+  }, [fetchPipelines]);
 
   const data = showEmpty ? [] : pipelines;
 
@@ -37,7 +51,6 @@ export default function PipelinesScreen() {
           {
             text: togglePauseLabel,
             onPress: () => {
-              // CLAUDE_CODE: wire to PipelineService.pauseResume
               updatePipeline(p.id, { status: p.status === "paused" ? "running" : "paused" });
             },
           },
@@ -96,6 +109,9 @@ export default function PipelinesScreen() {
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={Separator}
+        refreshControl={
+          <RefreshControl refreshing={refreshing || pipelinesLoading} onRefresh={onRefresh} tintColor={tokens.color.text.tertiary} />
+        }
         ListEmptyComponent={
           <EmptyPipelines onCreate={() => router.push("/(app)/pipelines/new")} />
         }
