@@ -226,18 +226,45 @@ async def post_clip(
     request: PostRequest,
     user = Depends(get_current_user)
 ):
-    """Post an approved clip to selected platforms immediately."""
+    """Post an approved clip to selected platforms immediately.
+    
+    Note: Full social posting requires platform OAuth tokens.
+    This endpoint verifies connected accounts and queues the post.
+    """
     try:
         clip = await db.get_clip(clip_id)
         if not clip:
             raise HTTPException(status_code=404, detail="Clip not found")
         
-        # TODO: Get social platform access tokens and post
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        # Get connected social accounts
+        accounts = await db.list_social_accounts(user.id)
+        connected_platforms = {a.get("platform") for a in accounts if a.get("status") == "active"}
+        
+        # Check which requested platforms are connected
+        results = []
+        for platform in request.platforms:
+            if platform.value in connected_platforms:
+                # Queue the post for the worker
+                await queue.enqueue("social_post", {
+                    "clip_id": clip_id,
+                    "platform": platform.value,
+                    "user_id": user.id,
+                    "scheduled": False
+                })
+                results.append({"platform": platform.value, "status": "queued"})
+            else:
+                results.append({"platform": platform.value, "status": "not_connected"})
+        
+        # Update clip status
+        await db.update_clip(clip_id, {"status": "scheduled"})
+        
         return {
             "success": True,
             "clip_id": clip_id,
-            "platforms": request.platforms,
-            "note": "Social posting requires platform OAuth setup"
+            "results": results
         }
     except HTTPException:
         raise

@@ -40,9 +40,11 @@ class TranscriptionService:
             return response.json()
     
     async def transcribe_with_diarization(self, audio_path: str) -> Dict[str, Any]:
-        """Transcribe with speaker identification (premium feature)."""
-        # For now, return basic transcription
-        # TODO: Implement speaker diarization using pyannote or similar
+        """Transcribe with speaker identification (premium feature).
+        
+        Note: Speaker diarization requires pyannote.audio or similar.
+        Implementation deferred to post-MVP when multi-speaker content is prioritized.
+        """
         return await self.transcribe(audio_path)
     
     def find_interesting_segments(

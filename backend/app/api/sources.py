@@ -49,8 +49,12 @@ async def get_source(
 ):
     """Get a specific source."""
     try:
-        # TODO: Add get_source to database service
-        raise HTTPException(status_code=404, detail="Source not found")
+        source = await db.get_source(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+        if source.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        return source
     except HTTPException:
         raise
     except Exception as e:
@@ -63,8 +67,16 @@ async def delete_source(
 ):
     """Delete a source."""
     try:
-        # TODO: Implement delete in database service
-        return {"success": True, "source_id": source_id}
+        source = await db.get_source(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+        if source.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        success = await db.delete_source(source_id)
+        return {"success": success, "source_id": source_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete source: {str(e)}")
 
@@ -75,11 +87,25 @@ async def refresh_source(
 ):
     """Manually trigger a source refresh."""
     try:
-        # TODO: Trigger source scraping job
+        source = await db.get_source(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+        if source.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        await queue.enqueue("source_refresh", {
+            "source_id": source_id,
+            "user_id": user.id,
+            "source_type": source.get("type"),
+            "url": source.get("url")
+        })
+        
         return {
             "success": True,
             "source_id": source_id,
             "message": "Refresh queued"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to refresh source: {str(e)}")

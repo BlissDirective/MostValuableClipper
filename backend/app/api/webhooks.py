@@ -58,19 +58,34 @@ async def _handle_checkout_completed(session: Dict[str, Any]):
     
     logger.info(f"[Stripe] Checkout completed for customer: {customer_id}")
     
-    # TODO: Update user subscription in database
-    # await db.update_subscription(customer_id, {
-    #     "stripe_subscription_id": subscription_id,
-    #     "status": "active"
-    # })
+    # Update or create subscription record
+    try:
+        await db.update_subscription(customer_id, {
+            "stripe_customer_id": customer_id,
+            "stripe_subscription_id": subscription_id,
+            "status": "active",
+            "tier": "pro",  # Derive from session if available
+            "updated_at": "now()"
+        })
+    except Exception as e:
+        logger.error(f"[Stripe] Failed to update subscription: {e}")
 
 async def _handle_invoice_paid(invoice: Dict[str, Any]):
     """Handle invoice.paid."""
     customer_id = invoice.get("customer")
+    subscription_id = invoice.get("subscription")
     
     logger.info(f"[Stripe] Invoice paid for customer: {customer_id}")
     
-    # TODO: Record payment, update subscription status
+    try:
+        await db.update_subscription(customer_id, {
+            "status": "active",
+            "stripe_subscription_id": subscription_id,
+            "last_payment_status": "paid",
+            "updated_at": "now()"
+        })
+    except Exception as e:
+        logger.error(f"[Stripe] Failed to record payment: {e}")
 
 async def _handle_invoice_failed(invoice: Dict[str, Any]):
     """Handle invoice.payment_failed."""
@@ -78,7 +93,14 @@ async def _handle_invoice_failed(invoice: Dict[str, Any]):
     
     logger.warning(f"[Stripe] Invoice payment failed for customer: {customer_id}")
     
-    # TODO: Update subscription status, notify user
+    try:
+        await db.update_subscription(customer_id, {
+            "status": "past_due",
+            "last_payment_status": "failed",
+            "updated_at": "now()"
+        })
+    except Exception as e:
+        logger.error(f"[Stripe] Failed to update subscription status: {e}")
 
 async def _handle_subscription_updated(subscription: Dict[str, Any]):
     """Handle customer.subscription.updated."""
@@ -87,7 +109,15 @@ async def _handle_subscription_updated(subscription: Dict[str, Any]):
     
     logger.info(f"[Stripe] Subscription updated: {customer_id} -> {status}")
     
-    # TODO: Update subscription status in database
+    try:
+        await db.update_subscription(customer_id, {
+            "status": status,
+            "current_period_end": subscription.get("current_period_end"),
+            "cancel_at_period_end": subscription.get("cancel_at_period_end", False),
+            "updated_at": "now()"
+        })
+    except Exception as e:
+        logger.error(f"[Stripe] Failed to update subscription: {e}")
 
 async def _handle_subscription_deleted(subscription: Dict[str, Any]):
     """Handle customer.subscription.deleted."""
@@ -95,7 +125,15 @@ async def _handle_subscription_deleted(subscription: Dict[str, Any]):
     
     logger.info(f"[Stripe] Subscription cancelled: {customer_id}")
     
-    # TODO: Mark subscription as cancelled, downgrade user to free tier
+    try:
+        await db.update_subscription(customer_id, {
+            "status": "cancelled",
+            "tier": "free",
+            "cancel_at_period_end": False,
+            "updated_at": "now()"
+        })
+    except Exception as e:
+        logger.error(f"[Stripe] Failed to mark subscription cancelled: {e}")
 
 @router.post("/tiktok")
 async def tiktok_webhook(request: Request):
@@ -103,7 +141,15 @@ async def tiktok_webhook(request: Request):
     payload = await request.json()
     logger.info(f"[TikTok Webhook] Received: {payload}")
     
-    # TODO: Handle video published, metrics updated events
+    # Store webhook payload for processing
+    try:
+        await db.store_analytics_event({
+            "event_type": "tiktok_webhook",
+            "event_data": payload,
+            "created_at": "now()"
+        })
+    except Exception as e:
+        logger.error(f"[TikTok Webhook] Failed to store: {e}")
     
     return {"status": "received"}
 
@@ -113,7 +159,15 @@ async def instagram_webhook(request: Request):
     payload = await request.json()
     logger.info(f"[Instagram Webhook] Received: {payload}")
     
-    # TODO: Handle media published, insights updated events
+    # Store webhook payload for processing
+    try:
+        await db.store_analytics_event({
+            "event_type": "instagram_webhook",
+            "event_data": payload,
+            "created_at": "now()"
+        })
+    except Exception as e:
+        logger.error(f"[Instagram Webhook] Failed to store: {e}")
     
     return {"status": "received"}
 

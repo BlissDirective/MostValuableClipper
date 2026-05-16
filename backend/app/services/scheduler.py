@@ -211,8 +211,8 @@ class MetricsSyncScheduler:
         
         for result in post_results:
             platform = result.get("platform")
-            # TODO: Get metrics from platform APIs
-            # This requires OAuth tokens which aren't stored yet
+            # Platform metrics sync requires OAuth tokens (stored in social_accounts table)
+            # This will be implemented when platform OAuth flows are complete
             pass
         
         # Update clip with new metrics

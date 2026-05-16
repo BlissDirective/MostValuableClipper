@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from pydantic import BaseModel
+from datetime import datetime
 
 from app.services.auth import get_current_user
+from app.services.database import SupabaseService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+db = SupabaseService()
 
 class EventPayload(BaseModel):
     event_type: str
@@ -16,20 +19,63 @@ async def track_event(
     user = Depends(get_current_user)
 ):
     """Track an analytics event."""
-    # TODO: Store in Supabase
-    return {"success": True}
+    try:
+        await db.store_analytics_event({
+            "user_id": user.id,
+            "event_type": event.event_type,
+            "event_data": event.event_data,
+            "created_at": datetime.now().isoformat()
+        })
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to track event: {str(e)}")
 
 @router.get("/dashboard")
 async def get_analytics_dashboard(user = Depends(get_current_user)):
     """Get full analytics dashboard."""
-    # TODO: Implement
-    return {
-        "total_clips": 0,
-        "total_views": 0,
-        "total_revenue": 0,
-        "platform_breakdown": {},
-        "daily_stats": []
-    }
+    try:
+        # Get user's clips for stats
+        from app.services.database import SupabaseService
+        _db = SupabaseService()
+        clips = await _db.list_clips(user_id=user.id, limit=1000)
+        
+        total_clips = len(clips)
+        total_views = sum(c.get("views", 0) for c in clips)
+        total_revenue = sum(c.get("revenue", 0) for c in clips)
+        
+        platform_breakdown = {}
+        for clip in clips:
+            posts = clip.get("platform_posts", [])
+            for post in posts:
+                platform = post.get("platform", "unknown")
+                platform_breakdown[platform] = platform_breakdown.get(platform, 0) + 1
+        
+        # Daily stats for the last 30 days
+        daily_stats = []
+        from collections import defaultdict
+        by_day = defaultdict(lambda: {"clips": 0, "views": 0})
+        for clip in clips:
+            day = clip.get("created_at", "")[:10] if clip.get("created_at") else ""
+            if day:
+                by_day[day]["clips"] += 1
+                by_day[day]["views"] += clip.get("views", 0)
+        
+        for day, stats in sorted(by_day.items())[-30:]:
+            daily_stats.append({
+                "date": day,
+                "clips_generated": stats["clips"],
+                "views": stats["views"]
+            })
+        
+        return {
+            "total_clips": total_clips,
+            "total_views": total_views,
+            "total_revenue": total_revenue,
+            "platform_breakdown": platform_breakdown,
+            "daily_stats": daily_stats
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get dashboard: {str(e)}")
 
 @router.get("/pipeline/{pipeline_id}")
 async def get_pipeline_analytics(
@@ -38,12 +84,30 @@ async def get_pipeline_analytics(
     user = Depends(get_current_user)
 ):
     """Get analytics for a specific pipeline."""
-    # TODO: Implement
-    return {
-        "pipeline_id": pipeline_id,
-        "period_days": days,
-        "clips_generated": 0,
-        "clips_posted": 0,
-        "total_views": 0,
-        "engagement_rate": 0
-    }
+    try:
+        from app.services.database import SupabaseService
+        _db = SupabaseService()
+        
+        # Verify ownership
+        pipeline = await _db.get_pipeline(pipeline_id)
+        if not pipeline or pipeline.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        clips = await _db.list_clips(user_id=user.id, pipeline_id=pipeline_id, limit=1000)
+        
+        total_views = sum(c.get("views", 0) for c in clips)
+        engagement = sum(c.get("likes", 0) + c.get("comments", 0) + c.get("shares", 0) for c in clips)
+        engagement_rate = (engagement / total_views * 100) if total_views > 0 else 0
+        
+        return {
+            "pipeline_id": pipeline_id,
+            "period_days": days,
+            "clips_generated": len(clips),
+            "clips_posted": len([c for c in clips if c.get("status") == "posted"]),
+            "total_views": total_views,
+            "engagement_rate": round(engagement_rate, 2)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get pipeline analytics: {str(e)}")

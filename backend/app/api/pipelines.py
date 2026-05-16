@@ -49,8 +49,13 @@ async def get_pipeline(
 ):
     """Get pipeline details."""
     try:
-        # TODO: Add get_pipeline to database service
-        raise HTTPException(status_code=404, detail="Pipeline not found")
+        pipeline = await db.get_pipeline(pipeline_id)
+        if not pipeline:
+            raise HTTPException(status_code=404, detail="Pipeline not found")
+        # Verify ownership
+        if pipeline.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        return pipeline
     except HTTPException:
         raise
     except Exception as e:
@@ -64,8 +69,17 @@ async def update_pipeline(
 ):
     """Update pipeline settings."""
     try:
-        # TODO: Add update_pipeline to database service
-        return {"id": pipeline_id, **update.model_dump(exclude_unset=True)}
+        # Verify ownership
+        pipeline = await db.get_pipeline(pipeline_id)
+        if not pipeline:
+            raise HTTPException(status_code=404, detail="Pipeline not found")
+        if pipeline.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        updated = await db.update_pipeline(pipeline_id, update.model_dump(exclude_unset=True))
+        return updated
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update pipeline: {str(e)}")
 
@@ -76,8 +90,19 @@ async def toggle_pipeline(
 ):
     """Toggle pipeline between running and paused."""
     try:
-        # TODO: Get current status and toggle
-        return {"success": True, "pipeline_id": pipeline_id, "status": "running"}
+        pipeline = await db.get_pipeline(pipeline_id)
+        if not pipeline:
+            raise HTTPException(status_code=404, detail="Pipeline not found")
+        if pipeline.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        current_status = pipeline.get("status", "paused")
+        new_status = "active" if current_status != "active" else "paused"
+        
+        updated = await db.update_pipeline(pipeline_id, {"status": new_status})
+        return {"success": True, "pipeline_id": pipeline_id, "status": new_status, "data": updated}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to toggle pipeline: {str(e)}")
 
@@ -88,8 +113,16 @@ async def delete_pipeline(
 ):
     """Delete a pipeline."""
     try:
-        # TODO: Implement delete in database service
-        return {"success": True, "pipeline_id": pipeline_id}
+        pipeline = await db.get_pipeline(pipeline_id)
+        if not pipeline:
+            raise HTTPException(status_code=404, detail="Pipeline not found")
+        if pipeline.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        success = await db.delete_pipeline(pipeline_id)
+        return {"success": success, "pipeline_id": pipeline_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete pipeline: {str(e)}")
 
