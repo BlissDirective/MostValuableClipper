@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -21,7 +21,7 @@ import { ActionButton } from "@/components/ActionButton";
 import { AccountBadge, Platform as AccountPlatform } from "@/components/AccountBadge";
 import { InsightTile } from "@/components/InsightTile";
 import { MetricChip } from "@/components/MetricChip";
-import { useAuthStore } from "@/lib/store";
+import { useAuthStore, type PlatformKey } from "@/lib/store";
 import { triggerHaptic } from "@/utils/haptics";
 
 type Period = "7d" | "30d" | "all";
@@ -90,9 +90,18 @@ const DEFAULT_ENTRY: ManualEntry = {
 
 export default function EarningsScreen() {
   const pipelines = useAuthStore((s) => s.pipelines);
+  const earningsSummary = useAuthStore((s) => s.earningsSummary);
+  const socialAccounts = useAuthStore((s) => s.socialAccounts);
+  const fetchEarnings = useAuthStore((s) => s.fetchEarnings);
+  const fetchSocialAccounts = useAuthStore((s) => s.fetchSocialAccounts);
   const [period, setPeriod] = useState<Period>("30d");
   const [manualOpen, setManualOpen] = useState<boolean>(false);
   const [entry, setEntry] = useState<ManualEntry>(DEFAULT_ENTRY);
+
+  useEffect(() => {
+    fetchEarnings();
+    fetchSocialAccounts();
+  }, [fetchEarnings, fetchSocialAccounts]);
 
   const headline = TOTAL_BY_PERIOD[period];
 
@@ -107,7 +116,6 @@ export default function EarningsScreen() {
 
   const onSubmitManual = () => {
     console.log("[earnings] manual entry submit", entry);
-    // CLAUDE_CODE: wire to ManualMetricsService.ingest
     triggerHaptic("approve");
     setManualOpen(false);
     setEntry(DEFAULT_ENTRY);

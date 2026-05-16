@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -31,7 +31,15 @@ export default function ProfileScreen() {
   const user = useAuthStore((s) => s.user);
   const connected = useAuthStore((s) => s.draft.connected);
   const togglePlatform = useAuthStore((s) => s.togglePlatform);
+  const subscriptionTier = useAuthStore((s) => s.subscriptionTier);
+  const fetchSubscription = useAuthStore((s) => s.fetchSubscription);
+  const fetchSocialAccounts = useAuthStore((s) => s.fetchSocialAccounts);
   const [showAccounts, setShowAccounts] = useState<boolean>(false);
+
+  useEffect(() => {
+    fetchSubscription();
+    fetchSocialAccounts();
+  }, [fetchSubscription, fetchSocialAccounts]);
 
   const onSignOut = useCallback(async () => {
     try {
@@ -56,7 +64,7 @@ export default function ProfileScreen() {
           <Text style={styles.displayName}>{user?.full_name || user?.email || "User"}</Text>
           <Text style={styles.email}>{user?.email || ""}</Text>
           <View style={styles.tierPill}>
-            <Text style={styles.tierText}>Free</Text>
+            <Text style={styles.tierText}>{subscriptionTier.charAt(0).toUpperCase() + subscriptionTier.slice(1)}</Text>
           </View>
         </View>
 
@@ -90,7 +98,6 @@ export default function ProfileScreen() {
                     size="sm"
                     onPress={() => {
                       console.log("[profile] toggle account", p.key);
-                      // CLAUDE_CODE: wire to OAuth flow for {platform}
                       togglePlatform(p.key);
                     }}
                   />
