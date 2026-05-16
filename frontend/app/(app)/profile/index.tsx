@@ -27,17 +27,20 @@ const PLATFORMS: { key: PlatformKey; label: string }[] = [
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const reset = useAuthStore((s) => s.reset);
+  const doSignOut = useAuthStore((s) => s.doSignOut);
+  const user = useAuthStore((s) => s.user);
   const connected = useAuthStore((s) => s.draft.connected);
   const togglePlatform = useAuthStore((s) => s.togglePlatform);
   const [showAccounts, setShowAccounts] = useState<boolean>(false);
 
-  const onSignOut = useCallback(() => {
-    console.log("[profile] sign out — stub");
-    // CLAUDE_CODE: wire to supabase auth signOut
-    reset();
-    router.replace("/(auth)/welcome");
-  }, [reset, router]);
+  const onSignOut = useCallback(async () => {
+    try {
+      await doSignOut();
+      router.replace("/(auth)/welcome");
+    } catch (err: any) {
+      console.error("[profile] sign out error:", err.message);
+    }
+  }, [doSignOut, router]);
 
   return (
     <SafeAreaView edges={["top"]} style={styles.safe}>
@@ -50,10 +53,10 @@ export default function ProfileScreen() {
               strokeWidth={tokens.icon.stroke.default}
             />
           </View>
-          <Text style={styles.displayName}>Analyst account</Text>
-          <Text style={styles.email}>analyst@mvc.app</Text>
+          <Text style={styles.displayName}>{user?.full_name || user?.email || "User"}</Text>
+          <Text style={styles.email}>{user?.email || ""}</Text>
           <View style={styles.tierPill}>
-            <Text style={styles.tierText}>Basic</Text>
+            <Text style={styles.tierText}>Free</Text>
           </View>
         </View>
 

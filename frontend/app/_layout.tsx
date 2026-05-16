@@ -24,19 +24,34 @@ const queryClient = new QueryClient();
 function AuthGate() {
   const segments = useSegments();
   const router = useRouter();
-  const hasOnboarded = useAuthStore((s) => s.hasOnboarded);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isLoading = useAuthStore((s) => s.isLoading);
+  const checkSession = useAuthStore((s) => s.checkSession);
 
   useEffect(() => {
+    // Check for existing session on mount
+    checkSession();
+  }, []);
+
+  useEffect(() => {
+    if (isLoading) return; // Wait until session check completes
+
     const first = segments[0] as string | undefined;
     const inAuth = first === "(auth)";
     const inApp = first === "(app)";
 
-    if (!hasOnboarded && !inAuth) {
+    if (!isAuthenticated && !inAuth) {
       router.replace("/(auth)/welcome");
-    } else if (hasOnboarded && !inApp) {
+    } else if (isAuthenticated && !inApp) {
       router.replace("/(app)");
     }
-  }, [hasOnboarded, segments, router]);
+  }, [isAuthenticated, isLoading, segments, router]);
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: tokens.color.bg.base }} />
+    );
+  }
 
   return (
     <Stack
@@ -60,23 +75,19 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded) {
-      SplashScreen.hideAsync();
-    }
+    if (fontsLoaded) SplashScreen.hideAsync();
   }, [fontsLoaded]);
 
-  if (!fontsLoaded) {
-    return <View style={{ flex: 1, backgroundColor: tokens.color.bg.base }} />;
-  }
+  if (!fontsLoaded) return null;
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <GestureHandlerRootView style={{ flex: 1, backgroundColor: tokens.color.bg.base }}>
-          <StatusBar style="light" />
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <QueryClientProvider client={queryClient}>
           <AuthGate />
-        </GestureHandlerRootView>
-      </SafeAreaProvider>
-    </QueryClientProvider>
+          <StatusBar style="light" />
+        </QueryClientProvider>
+      </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }

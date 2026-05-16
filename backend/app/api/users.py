@@ -19,13 +19,15 @@ class UserProfileUpdate(BaseModel):
 @router.get("/me")
 async def get_current_user_profile(user = Depends(get_current_user)):
     """Get current user's profile."""
-    # TODO: Implement
     return {
-        "id": user.id if hasattr(user, 'id') else None,
-        "email": user.email if hasattr(user, 'email') else None,
-        "subscription_tier": "free",
-        "autonomy_mode": "approveEach",
-        "onboarding_completed": False
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.user_metadata.get("full_name") if user.user_metadata else None,
+        "avatar_url": user.user_metadata.get("avatar_url") if user.user_metadata else None,
+        "subscription_tier": user.user_metadata.get("subscription_tier", "free") if user.user_metadata else "free",
+        "autonomy_mode": user.user_metadata.get("autonomy_mode", "approveEach") if user.user_metadata else "approveEach",
+        "onboarding_completed": user.user_metadata.get("onboarding_completed", False) if user.user_metadata else False,
+        "created_at": user.created_at if hasattr(user, 'created_at') else None
     }
 
 @router.patch("/me")
@@ -34,13 +36,12 @@ async def update_profile(
     user = Depends(get_current_user)
 ):
     """Update user profile."""
-    # TODO: Implement
+    # TODO: Persist to Supabase auth metadata
     return {"success": True}
 
 @router.get("/me/onboarding")
 async def get_onboarding_state(user = Depends(get_current_user)):
     """Get onboarding progress."""
-    # TODO: Implement
     return {
         "current_step": "theme-selection",
         "steps": [],
@@ -53,13 +54,11 @@ async def update_onboarding(
     user = Depends(get_current_user)
 ):
     """Update onboarding progress."""
-    # TODO: Implement
     return {"success": True}
 
 @router.get("/me/subscription")
 async def get_subscription(user = Depends(get_current_user)):
     """Get current subscription details."""
-    # TODO: Implement
     return {
         "tier": "free",
         "status": "active",

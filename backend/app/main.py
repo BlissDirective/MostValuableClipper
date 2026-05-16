@@ -8,7 +8,7 @@ import logging
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.events import startup_event, shutdown_event
-from app.api import health, users, clips, pipelines, sources, earnings, webhooks, social, analytics, legal
+from app.api import health, users, clips, pipelines, sources, earnings, webhooks, social, analytics, legal, auth
 
 # Setup logging
 setup_logging()
@@ -51,6 +51,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include routers
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
+app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 app.include_router(users.router, prefix="/api/v1", tags=["users"])
 app.include_router(clips.router, prefix="/api/v1", tags=["clips"])
 app.include_router(pipelines.router, prefix="/api/v1", tags=["pipelines"])

@@ -9,15 +9,11 @@ import { ActionButton } from "@/components/ActionButton";
 
 export default function WelcomeScreen() {
   const handleCreate = () => {
-    console.log("[auth] create account — stub");
-    // CLAUDE_CODE: wire to supabase auth signUp
-    router.push("/(auth)/theme-input");
+    router.push("/(auth)/auth");
   };
 
   const handleSignIn = () => {
-    console.log("[auth] sign in — stub");
-    // CLAUDE_CODE: wire to supabase auth signIn
-    router.push("/(auth)/theme-input");
+    router.push("/(auth)/auth");
   };
 
   return (
