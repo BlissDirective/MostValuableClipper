@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Modal,
@@ -115,9 +115,15 @@ export default function PipelineDetailScreen() {
   const pipeline = useAuthStore((s) => s.pipelines.find((p) => p.id === id));
   const updatePipeline = useAuthStore((s) => s.updatePipeline);
   const removePipeline = useAuthStore((s) => s.removePipeline);
-
+  const fetchSources = useAuthStore((s) => s.fetchSources);
+  const addSource = useAuthStore((s) => s.addSource);
+  const removeSourceAction = useAuthStore((s) => s.removeSource);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [cadenceOpen, setCadenceOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (id) fetchSources(id);
+  }, [id, fetchSources]);
 
   if (!pipeline) {
     return (
@@ -145,39 +151,19 @@ export default function PipelineDetailScreen() {
         {
           text: "User upload",
           onPress: () => {
-            // CLAUDE_CODE: wire to file picker
-            const next: PipelineSource = {
-              id: `s-${Date.now()}`,
-              kind: "upload",
-              name: "new_upload.mp4",
-              status: "pending",
-            };
-            updatePipeline(pipeline.id, { sources: [...pipeline.sources, next] });
+            addSource(id, { name: "new_upload.mp4", kind: "upload", sourceType: "upload", sourceUrl: "" });
           },
         },
         {
           text: "Creator-licensed",
           onPress: () => {
-            // CLAUDE_CODE: wire to partner OAuth
-            const next: PipelineSource = {
-              id: `s-${Date.now()}`,
-              kind: "creator-licensed",
-              name: "Licensed catalog",
-              status: "pending",
-            };
-            updatePipeline(pipeline.id, { sources: [...pipeline.sources, next] });
+            addSource(id, { name: "Licensed catalog", kind: "creator-licensed", sourceType: "youtube", sourceUrl: "" });
           },
         },
         {
           text: "CC archive",
           onPress: () => {
-            const next: PipelineSource = {
-              id: `s-${Date.now()}`,
-              kind: "cc-archive",
-              name: "Public domain archive",
-              status: "pending",
-            };
-            updatePipeline(pipeline.id, { sources: [...pipeline.sources, next] });
+            addSource(id, { name: "Public domain archive", kind: "cc-archive", sourceType: "rss", sourceUrl: "" });
           },
         },
         { text: "Cancel", style: "cancel" },
@@ -186,9 +172,9 @@ export default function PipelineDetailScreen() {
     );
   };
 
-  const removeSource = (sid: string) => {
+  const onRemoveSource = (sid: string) => {
     triggerHaptic("selection");
-    updatePipeline(pipeline.id, { sources: pipeline.sources.filter((s) => s.id !== sid) });
+    removeSourceAction(id, sid);
   };
 
   const onDelete = () => {
@@ -247,7 +233,7 @@ export default function PipelineDetailScreen() {
           {/* Sources */}
           <Section title="Sources">
             {pipeline.sources.map((s) => (
-              <SourceRow key={s.id} source={s} onRemove={() => removeSource(s.id)} />
+              <SourceRow key={s.id} source={s} onRemove={() => onRemoveSource(s.id)} />
             ))}
             <Pressable onPress={onAddSource} style={styles.addSource} accessibilityRole="button">
               <Plus size={tokens.icon.size.sm} color={tokens.color.accent.secondary} strokeWidth={tokens.icon.stroke.default} />
@@ -449,7 +435,7 @@ export default function PipelineDetailScreen() {
               variant="ghost"
               size="sm"
               onPress={() => {
-                // CLAUDE_CODE: pass pipeline filter to Insights tab
+                
                 router.push("/(app)/insights");
               }}
             />
