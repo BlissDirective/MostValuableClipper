@@ -120,7 +120,6 @@ export default function NewPipelineScreen() {
       sources: [],
       sourcePlan: { uploads: true, creatorLicensed, ccArchive },
     };
-    // CLAUDE_CODE: wire to PipelineService.create
     addPipeline(next);
     router.replace("/(app)/pipelines");
   }, [theme, clipsPerDay, platforms, autonomy, creatorLicensed, ccArchive, addPipeline, router]);

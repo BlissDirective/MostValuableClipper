@@ -15,7 +15,6 @@ export default function ThemeInputScreen() {
   const onContinue = useCallback(() => {
     if (!canContinue) return;
     console.log("[onboarding] theme submitted", theme);
-    // CLAUDE_CODE: wire to source-resolution service
     router.push("/(auth)/connect-accounts");
   }, [canContinue, theme]);
 

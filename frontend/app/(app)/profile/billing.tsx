@@ -1,11 +1,13 @@
-import React from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Check, ChevronLeft, ExternalLink, Sparkles } from "lucide-react-native";
 
 import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
+import { useAuthStore } from "@/lib/store";
+import { subscriptionsApi } from "@/lib/api";
 
 interface TierFeature {
   label: string;
@@ -26,6 +28,41 @@ const FEATURES: TierFeature[] = [
 
 export default function BillingScreen() {
   const router = useRouter();
+  const subscriptionTier = useAuthStore((s) => s.subscriptionTier);
+  const fetchSubscription = useAuthStore((s) => s.fetchSubscription);
+  const [loading, setLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSubscription();
+  }, [fetchSubscription]);
+
+  const openCheckout = useCallback(async (tier: string) => {
+    setLoading(tier);
+    try {
+      const res = await subscriptionsApi.createCheckoutSession(tier);
+      if (res.data.checkout_url) {
+        await Linking.openURL(res.data.checkout_url);
+      }
+    } catch (err: any) {
+      Alert.alert("Checkout error", err.message || "Could not start checkout.");
+    } finally {
+      setLoading(null);
+    }
+  }, []);
+
+  const openPortal = useCallback(async () => {
+    setLoading("portal");
+    try {
+      const res = await subscriptionsApi.createCustomerPortal();
+      if (res.data.portal_url) {
+        await Linking.openURL(res.data.portal_url);
+      }
+    } catch (err: any) {
+      Alert.alert("Portal error", err.message || "Could not open billing portal.");
+    } finally {
+      setLoading(null);
+    }
+  }, []);
 
   return (
     <View style={styles.root}>
@@ -91,29 +128,29 @@ export default function BillingScreen() {
 
           <View style={styles.ctaGroup}>
             <ActionButton
-              label="Upgrade to Premium"
+              label={loading === 'pro' ? 'Loading...' : 'Upgrade to Premium'}
               variant="primary"
               size="lg"
               fullWidth
-              onPress={() => console.log("[billing] upgrade — stub")}
-              // CLAUDE_CODE: wire to Stripe checkout (Premium tier)
+              disabled={!!loading}
+              onPress={() => openCheckout('pro')}
             />
             <ActionButton
-              label="Switch to annual (save 15%)"
+              label={loading === 'annual' ? 'Loading...' : 'Switch to annual (save 15%)'}
               variant="secondary"
               size="md"
               fullWidth
-              onPress={() => console.log("[billing] annual — stub")}
-              // CLAUDE_CODE: wire to Stripe price-switch (annual)
+              disabled={!!loading}
+              onPress={() => openCheckout('pro')}
             />
             <ActionButton
-              label="Manage in Stripe"
+              label={loading === 'portal' ? 'Loading...' : 'Manage in Stripe'}
               variant="ghost"
               size="md"
               fullWidth
               iconRight={ExternalLink}
-              onPress={() => console.log("[billing] manage portal — stub")}
-              // CLAUDE_CODE: open Stripe customer portal session URL
+              disabled={!!loading}
+              onPress={openPortal}
             />
           </View>
 

@@ -73,6 +73,15 @@ class StripeService:
         )
     
     @staticmethod
+    async def create_customer_portal_session(customer_id: str, return_url: str) -> Dict[str, Any]:
+        """Create a Stripe customer portal session."""
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=return_url
+        )
+        return session
+
+    @staticmethod
     async def create_product(name: str, description: Optional[str] = None) -> Dict[str, Any]:
         """Create a Stripe product."""
         product = stripe.Product.create(

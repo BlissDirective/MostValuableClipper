@@ -1,14 +1,4 @@
-// CLAUDE_CODE TODO: implement pan gesture handlers via react-native-gesture-handler + react-native-reanimated.
-// Right swipe (>40% width) → approve, haptics.approve.
-// Left swipe (>40% width) → reject, haptics.reject + 5s undo toast.
-// Long-press 500ms → confirmation overlay "Remix this clip?" → confirm/cancel.
-// See component-spec.md §8 SwipeDeckCard for full behavior.
-//
-// Rork phase ships the visual stack + bottom action bar ONLY. Tapping
-// Approve / Reject advances the deck and console.logs; no gestures, no
-// reanimated worklets, no swipe haptics here.
-
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -19,81 +9,72 @@ import { ActionButton } from "@/components/ActionButton";
 import { SafetyFlag, SafetyVariant } from "@/components/SafetyFlag";
 import { SwipeDeckCard, SwipeDeckClip } from "@/components/SwipeDeckCard";
 import { triggerHaptic } from "@/utils/haptics";
+import { clipsApi, Clip } from "@/lib/api";
 
 interface QueueItem {
   clip: SwipeDeckClip;
   safetyFlags?: { variant: SafetyVariant; categories?: string[]; actionTaken?: string }[];
 }
 
-const QUEUE: QueueItem[] = [
-  {
+function mapClipToQueueItem(clip: Clip): QueueItem {
+  return {
     clip: {
-      id: "approval-1",
-      sourceName: "Design Details · Ep 412",
-      caption:
-        "Question-led hook: \"What's the hidden tax on every productivity app you open?\" Cut at 0:47 with on-screen pull-quote.",
-      targets: [
-        { platform: "tiktok", handle: "@studio" },
-        { platform: "instagram", handle: "@studio" },
-      ],
-      predictedReach: "18-24K",
-      predictedRetention: "+14%",
+      id: clip.id,
+      sourceName: clip.title || "Untitled clip",
+      caption: clip.caption || "No caption.",
+      targets: [],
     },
-  },
-  {
-    clip: {
-      id: "approval-2",
-      sourceName: "F1 Race Recap · Imola",
-      caption:
-        "Lap 38 undercut reconstruction. Three-angle composite. Caption length 78 chars — within best-performing range.",
-      targets: [
-        { platform: "tiktok" },
-        { platform: "youtube" },
-      ],
-      predictedReach: "9-12K",
-      predictedRetention: "+8%",
-    },
-    safetyFlags: [
-      {
-        variant: "warn",
-        categories: ["Identifiable individual"],
-        actionTaken: "Disclosure recommended in caption.",
-      },
-    ],
-  },
-  {
-    clip: {
-      id: "approval-3",
-      sourceName: "Health & Wellness Daily",
-      caption:
-        "Cohort study on intermittent fasting. Pull-quote: \"Markers, not headlines.\" Health disclosure auto-appended.",
-      targets: [{ platform: "tiktok" }, { platform: "instagram" }],
-      predictedReach: "6-8K",
-      predictedRetention: "+5%",
-    },
-    safetyFlags: [
-      {
-        variant: "warn",
-        categories: ["Health"],
-        actionTaken: "Source citation auto-appended.",
-      },
-    ],
-  },
-];
+    safetyFlags: clip.safety_flags?.length
+      ? [{
+          variant: "warn" as SafetyVariant,
+          categories: clip.safety_flags,
+          actionTaken: "Review before posting.",
+        }]
+      : undefined,
+  };
+}
 
 export default function ApprovalScreen() {
   const router = useRouter();
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
   const [index, setIndex] = useState<number>(0);
 
-  const total = QUEUE.length;
-  const current = QUEUE[index];
-  const next = QUEUE[index + 1];
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    clipsApi.list({ status: "ready_for_review", limit: 20 })
+      .then((res) => {
+        if (cancelled) return;
+        const items = (res.data.items || []).map(mapClipToQueueItem);
+        setQueue(items);
+      })
+      .catch((err) => {
+        console.warn("[approval] fetch failed:", err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const total = queue.length;
+  const current = queue[index];
+  const next = queue[index + 1];
 
   const advance = useCallback(
-    (verdict: "approve" | "reject") => {
-      console.log("[approval] verdict", { id: current?.clip.id, verdict });
-      // CLAUDE_CODE: wire to ApprovalService.submit({clipId, verdict})
+    async (verdict: "approve" | "reject") => {
+      if (!current) return;
       triggerHaptic(verdict === "approve" ? "approve" : "reject");
+      try {
+        if (verdict === "approve") {
+          await clipsApi.approve(current.clip.id);
+        } else {
+          await clipsApi.reject(current.clip.id);
+        }
+      } catch (err: any) {
+        console.warn(`[approval] ${verdict} failed:`, err.message);
+      }
       setIndex((i) => Math.min(i + 1, total));
     },
     [current, total]
@@ -101,16 +82,14 @@ export default function ApprovalScreen() {
 
   const onEdit = useCallback(() => {
     console.log("[approval] open editor", { id: current?.clip.id });
-    // CLAUDE_CODE: navigate to clip editor (post-MVP)
   }, [current]);
 
   const onRemix = useCallback(() => {
     console.log("[approval] remix tapped", { id: current?.clip.id });
-    // CLAUDE_CODE: long-press gesture confirms remix; see top-of-file note.
   }, [current]);
 
   const topBanner = useMemo(() => current?.safetyFlags?.[0], [current]);
-  const done = index >= total;
+  const done = index >= total || (!loading && total === 0);
 
   return (
     <View style={styles.root}>

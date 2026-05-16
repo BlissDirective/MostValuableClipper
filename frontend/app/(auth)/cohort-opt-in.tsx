@@ -8,6 +8,7 @@ import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
 import { useAuthStore } from "@/lib/store";
 import { triggerHaptic } from "@/utils/haptics";
+import { usersApi } from "@/lib/api";
 
 export default function CohortOptInScreen() {
   const cohortOptIn = useAuthStore((s) => s.draft.cohortOptIn);
@@ -19,9 +20,17 @@ export default function CohortOptInScreen() {
     setCohortOptIn(v);
   };
 
-  const onFinish = () => {
+  const onFinish = async () => {
     console.log("[onboarding] finished");
-    // CLAUDE_CODE: persist onboarding state to backend
+    try {
+      await usersApi.updateOnboarding({
+        current_step: "cohort-opt-in",
+        completed: true,
+        data: { cohortOptIn },
+      });
+    } catch (err: any) {
+      console.warn("[onboarding] persist failed:", err.message);
+    }
     finishOnboarding();
     router.replace("/(app)");
   };

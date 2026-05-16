@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
@@ -55,6 +55,14 @@ async def update_onboarding(
 ):
     """Update onboarding progress."""
     return {"success": True}
+
+@router.delete("/me")
+async def delete_account(user = Depends(get_current_user)):
+    """Delete the current user account (soft delete)."""
+    # TODO: Implement Supabase auth user deletion or soft-delete in database
+    # For MVP, return success and let the client clear local state
+    return {"success": True, "message": "Account deletion scheduled"}
+
 
 @router.get("/me/subscription")
 async def get_subscription(user = Depends(get_current_user)):

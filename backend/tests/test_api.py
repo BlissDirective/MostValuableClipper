@@ -160,18 +160,16 @@ class TestSubscriptionAPI:
         assert response.status_code == 401
 
     def test_create_checkout_unauthorized(self):
-        """Test creating checkout session without auth fails — endpoint not implemented yet."""
+        """Test creating checkout session without auth returns 401."""
         response = client.post("/api/v1/subscriptions/checkout", json={
-            "price_id": "price_test",
-            "success_url": "https://app.com/success",
-            "cancel_url": "https://app.com/cancel"
+            "tier": "pro"
         })
-        assert response.status_code == 404
+        assert response.status_code == 401
 
     def test_cancel_subscription_unauthorized(self):
-        """Test canceling subscription without auth fails — endpoint not implemented yet."""
+        """Test canceling subscription without auth returns 401."""
         response = client.post("/api/v1/subscriptions/cancel")
-        assert response.status_code == 404
+        assert response.status_code == 401
 
 
 class TestValidation:

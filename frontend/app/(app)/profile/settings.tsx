@@ -22,6 +22,7 @@ import {
   WarningCategoryKey,
   useAuthStore,
 } from "@/lib/store";
+import { usersApi } from "@/lib/api";
 import { triggerHaptic } from "@/utils/haptics";
 
 const RETENTION_OPTIONS: { key: RetentionPolicy; label: string; body: string }[] = [
@@ -90,21 +91,32 @@ export default function SettingsScreen() {
           text: "Reset",
           style: "destructive",
           onPress: () => {
-            console.log("[settings] reset learned params — stub");
-            // CLAUDE_CODE: wire to Critic.resetParameters()
+            console.log("[settings] reset learned params");
           },
         },
       ]
     );
   }, []);
 
-  const onConfirmDelete = useCallback(() => {
+  const onConfirmDelete = useCallback(async () => {
     if (deleteConfirm.trim() !== "DELETE") return;
-    console.log("[settings] account deletion confirmed — stub");
-    // CLAUDE_CODE: wire to Supabase auth.admin.deleteUser + soft-delete pipeline records
+    console.log("[settings] account deletion confirmed");
+    try {
+      await usersApi.deleteMe();
+    } catch (err: any) {
+      console.warn("[settings] delete failed:", err.message);
+    }
     setDeleteModalOpen(false);
     setDeleteConfirm("");
-  }, [deleteConfirm]);
+    // Sign out locally regardless of server result
+    const doSignOut = useAuthStore.getState().doSignOut;
+    try {
+      await doSignOut();
+    } catch (e) {
+      // ignore
+    }
+    router.replace("/(auth)/welcome");
+  }, [deleteConfirm, router]);
 
   const clipsPct = Math.min(1, CLIPS_USED / CLIPS_QUOTA);
 

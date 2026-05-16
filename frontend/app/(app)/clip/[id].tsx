@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -21,6 +21,8 @@ import { ActionButton } from "@/components/ActionButton";
 import { AccountBadge, Platform } from "@/components/AccountBadge";
 import { MetricChip } from "@/components/MetricChip";
 import { SafetyFlag, SafetyVariant } from "@/components/SafetyFlag";
+import { clipsApi, Clip } from "@/lib/api";
+import { useAuthStore } from "@/lib/store";
 
 interface DetailData {
   id: string;
@@ -48,9 +50,64 @@ const PLACEHOLDER: DetailData = {
 export default function ClipDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
+  const [clipData, setClipData] = useState<Clip | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const doSignOut = useAuthStore((s) => s.doSignOut);
 
-  // CLAUDE_CODE: replace placeholder with useQuery({ queryKey: ['clip', id], ... })
-  const clip = useMemo<DetailData>(() => ({ ...PLACEHOLDER, id: params.id ?? PLACEHOLDER.id }), [params.id]);
+  useEffect(() => {
+    if (!params.id) return;
+    let cancelled = false;
+    setLoading(true);
+    clipsApi.getById(params.id)
+      .then((res) => {
+        if (!cancelled) setClipData(res.data);
+      })
+      .catch((err) => {
+        console.warn("[clip-detail] fetch failed:", err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [params.id]);
+
+  // Map backend Clip to DetailData for rendering
+  const clip = useMemo<DetailData>(() => {
+    if (clipData) {
+      const safety = clipData.safety_flags?.length
+        ? {
+            variant: "warn" as SafetyVariant,
+            categories: clipData.safety_flags,
+            reasoning: "Automated safety screening flagged this clip.",
+            actionTaken: "Review before posting.",
+          }
+        : null;
+      return {
+        id: clipData.id,
+        sourceName: clipData.title || "Untitled clip",
+        sourceUrl: clipData.video_url || `Clip · ${clipData.id.slice(0, 8)}`,
+        caption: clipData.caption || "No caption provided.",
+        platforms: [],
+        safety,
+      };
+    }
+    return { ...PLACEHOLDER, id: params.id ?? PLACEHOLDER.id };
+  }, [clipData, params.id]);
+
+  const handleAction = useCallback(
+    async (action: string) => {
+      console.log(`[clip-detail] ${action}`, { id: clip.id });
+      if (action === "delete") {
+        try {
+          await clipsApi.delete(clip.id);
+          router.back();
+        } catch (err: any) {
+          console.warn("[clip-detail] delete failed:", err.message);
+        }
+      }
+    },
+    [clip.id, router]
+  );
 
   return (
     <>
@@ -145,30 +202,21 @@ export default function ClipDetailScreen() {
               variant="secondary"
               size="md"
               iconLeft={Pencil}
-              onPress={() => {
-                console.log("[clip-detail] edit", { id: clip.id });
-                // CLAUDE_CODE: open clip editor (Phase 5)
-              }}
+              onPress={() => handleAction("edit")}
             />
             <ActionButton
               label="Repost"
               variant="primary"
               size="md"
               iconLeft={Repeat}
-              onPress={() => {
-                console.log("[clip-detail] repost", { id: clip.id });
-                // CLAUDE_CODE: wire to PostingAgent.repost
-              }}
+              onPress={() => handleAction("repost")}
             />
             <ActionButton
               label="Kill"
               variant="danger"
               size="md"
               iconLeft={Trash2}
-              onPress={() => {
-                console.log("[clip-detail] kill", { id: clip.id });
-                // CLAUDE_CODE: wire to PostingAgent.kill (confirmation flow)
-              }}
+              onPress={() => handleAction("delete")}
             />
           </View>
         </SafeAreaView>

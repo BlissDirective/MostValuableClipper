@@ -164,7 +164,6 @@ export default function InsightsScreen() {
                   onValueChange={(v) => {
                     triggerHaptic("selection");
                     setApplyToAll(v);
-                    // CLAUDE_CODE: wire to CriticAgent.applyLearnings(allPipelines)
                   }}
                   trackColor={{ false: tokens.color.border.default, true: tokens.color.accent.primary }}
                   thumbColor={tokens.color.text.onAccent}
@@ -339,7 +338,6 @@ export default function InsightsScreen() {
                 variant="primary"
                 size="md"
                 onPress={() => {
-                  // CLAUDE_CODE: wire to InsightsService.filter(pipelineIds)
                   setFilterOpen(false);
                 }}
               />

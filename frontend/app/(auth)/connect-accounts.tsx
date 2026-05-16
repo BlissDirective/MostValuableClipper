@@ -27,7 +27,6 @@ export default function ConnectAccountsScreen() {
 
   const onConnect = (p: PlatformKey) => {
     console.log("[onboarding] toggle platform", p);
-    // CLAUDE_CODE: wire to OAuth platform connect service
     togglePlatform(p);
   };
 

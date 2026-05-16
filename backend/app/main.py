@@ -8,7 +8,7 @@ import logging
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.events import startup_event, shutdown_event
-from app.api import health, users, clips, pipelines, sources, earnings, webhooks, social, analytics, legal, auth
+from app.api import health, users, clips, pipelines, sources, earnings, webhooks, social, analytics, legal, auth, subscriptions
 
 # Setup logging
 setup_logging()
@@ -57,6 +57,7 @@ app.include_router(clips.router, prefix="/api/v1", tags=["clips"])
 app.include_router(pipelines.router, prefix="/api/v1", tags=["pipelines"])
 app.include_router(sources.router, prefix="/api/v1", tags=["sources"])
 app.include_router(earnings.router, prefix="/api/v1", tags=["earnings"])
+app.include_router(subscriptions.router, prefix="/api/v1", tags=["subscriptions"])
 app.include_router(webhooks.router, prefix="/api/v1", tags=["webhooks"])
 app.include_router(social.router, prefix="/api/v1", tags=["social"])
 app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
