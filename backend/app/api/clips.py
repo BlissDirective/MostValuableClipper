@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from app.models import (
     Clip, ClipCreate, ClipUpdate, ClipStatus,
-    Platform, PlatformPost
+    Platform, PlatformPost, ClipEditRequest
 )
 from app.services.auth import get_current_user
 from app.services.database import SupabaseService
@@ -12,6 +12,7 @@ from app.services.queue import QueueService
 from app.services.scheduler import PostScheduler
 from app.services.r2_service import R2Service
 from app.services.zernio_service import ZernioService
+from app.services.ffmpeg_service import FFmpegEditService
 from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/clips", tags=["clips"])
@@ -355,3 +356,100 @@ async def get_download_url(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {str(e)}")
+
+
+@router.post("/{clip_id}/edit")
+async def edit_clip(
+    clip_id: str,
+    request: ClipEditRequest,
+    user = Depends(get_current_user)
+):
+    """Edit a clip with advanced FFmpeg processing.
+    
+    Supports: trim, segments, caption, text overlays, filters,
+    speed adjustment, audio mute, transitions.
+    
+    Processing is async via queue. Returns job_id for polling.
+    """
+    try:
+        # Verify ownership
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        # Validate recipe
+        ffmpeg = FFmpegEditService()
+        is_valid, error = ffmpeg.validate_recipe(request.model_dump(exclude_unset=True))
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error)
+        
+        # Queue the edit job
+        recipe_data = request.model_dump(exclude_unset=True)
+        job_data = {
+            "job_type": "clip_edit",
+            "clip_id": clip_id,
+            "user_id": user.id,
+            "source_url": clip.get("video_url"),
+            "recipe": recipe_data,
+            "status": "queued",
+            "created_at": datetime.utcnow().isoformat()
+        }
+        
+        job_id = await queue.enqueue("clip_edit", job_data)
+        
+        # Update clip status to indicate editing in progress
+        await db.update_clip(clip_id, {
+            "status": "editing",
+            "edit_job_id": job_id,
+            "edit_recipe": recipe_data
+        })
+        
+        return {
+            "success": True,
+            "clip_id": clip_id,
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Edit job queued. Poll /clips/{id} for status updates."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Edit failed: {str(e)}")
+
+
+@router.get("/{clip_id}/edit-status")
+async def get_edit_status(
+    clip_id: str,
+    user = Depends(get_current_user)
+):
+    """Get the status of a clip edit job."""
+    try:
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        job_id = clip.get("edit_job_id")
+        if not job_id:
+            return {"status": "no_edit", "clip_id": clip_id}
+        
+        # Check queue status
+        job_status = await queue.get_job_status(job_id)
+        
+        return {
+            "clip_id": clip_id,
+            "job_id": job_id,
+            "status": job_status or clip.get("status", "unknown"),
+            "video_url": clip.get("video_url") if clip.get("status") == "rendered" else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get edit status: {str(e)}")

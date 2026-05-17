@@ -124,3 +124,19 @@ class EarningsSummary(BaseModel):
     paid_earnings: float = 0
     total_clips_monetized: int = 0
     by_platform: Dict[str, float] = {}
+
+# ============================================
+# CLIP EDITING MODELS
+# ============================================
+class ClipEditRequest(BaseModel):
+    """Edit recipe for clip modification via FFmpeg."""
+    trim: Optional[dict] = None  # {"start_seconds": 2.5, "end_seconds": 28.0}
+    segments: Optional[List[dict]] = None  # [{"start": 2.5, "end": 15.0}]
+    caption: Optional[str] = None
+    caption_style: Optional[dict] = None  # {"position": "bottom", "color": "white", "size": 24}
+    audio: Optional[str] = "keep"  # "keep", "mute", "replace:<url>"
+    speed: Optional[float] = 1.0  # 0.5 to 4.0
+    filters: Optional[List[str]] = None  # ["grayscale", "sepia", "vintage", "blur", "sharpen"]
+    text_overlays: Optional[List[dict]] = None
+    transitions: Optional[List[str]] = None  # ["fade", "dissolve"]
+    stickers: Optional[List[dict]] = None

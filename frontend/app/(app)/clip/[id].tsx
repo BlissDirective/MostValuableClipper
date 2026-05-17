@@ -145,6 +145,9 @@ export default function ClipDetailScreen() {
             }
           ]
         );
+      } else if (action === "edit") {
+        // Navigate to edit screen
+        router.push(`/(app)/clip/${clip.id}/edit`);
       } else {
         // Post-MVP: edit and repost actions require AI generation pipeline
         Alert.alert("Coming soon", `${action === "edit" ? "Clip editing" : "Reposting"} will be available in a future update.`);
