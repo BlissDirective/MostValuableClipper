@@ -13,7 +13,11 @@ import { usersApi } from "@/lib/api";
 export default function CohortOptInScreen() {
   const cohortOptIn = useAuthStore((s) => s.draft.cohortOptIn);
   const setCohortOptIn = useAuthStore((s) => s.setCohortOptIn);
+  const theme = useAuthStore((s) => s.draft.theme);
+  const connected = useAuthStore((s) => s.draft.connected);
+  const autonomy = useAuthStore((s) => s.draft.autonomy);
   const finishOnboarding = useAuthStore((s) => s.finishOnboarding);
+  const addPipeline = useAuthStore((s) => s.addPipeline);
 
   const onToggle = (v: boolean) => {
     triggerHaptic("selection");
@@ -21,7 +25,6 @@ export default function CohortOptInScreen() {
   };
 
   const onFinish = async () => {
-    console.log("[onboarding] finished");
     try {
       await usersApi.updateOnboarding({
         current_step: "cohort-opt-in",
@@ -31,6 +34,39 @@ export default function CohortOptInScreen() {
     } catch (err: any) {
       console.warn("[onboarding] persist failed:", err.message);
     }
+
+    // Create the user's first pipeline from onboarding draft data
+    if (theme.trim().length >= 3) {
+      try {
+        const platforms: import("@/lib/store").PlatformKey[] = (
+          Object.entries(connected) as [import("@/lib/store").PlatformKey, boolean][]
+        )
+          .filter(([, v]) => v)
+          .map(([k]) => k);
+
+        const newPipeline: import("@/lib/store").Pipeline = {
+          id: `draft-${Date.now()}`,
+          themeName: theme.trim(),
+          niche: "Custom theme",
+          status: "running",
+          clipsThisWeek: 0,
+          viewDelta: "—",
+          deltaVariant: "default",
+          clipsPerDay: 3,
+          platforms: platforms.length > 0 ? platforms : ["tiktok"],
+          autonomy,
+          resolverOn: true,
+          retention: "moderate",
+          warningCategories: import("@/lib/store").DEFAULT_WARNING_CATEGORIES,
+          sources: [],
+          sourcePlan: { uploads: true, creatorLicensed: true, ccArchive: false },
+        };
+        await addPipeline(newPipeline);
+      } catch (err: any) {
+        console.warn("[onboarding] create pipeline failed:", err.message);
+      }
+    }
+
     finishOnboarding();
     router.replace("/(app)");
   };

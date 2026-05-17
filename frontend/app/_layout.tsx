@@ -25,6 +25,7 @@ function AuthGate() {
   const segments = useSegments();
   const router = useRouter();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const hasOnboarded = useAuthStore((s) => s.hasOnboarded);
   const isLoading = useAuthStore((s) => s.isLoading);
   const checkSession = useAuthStore((s) => s.checkSession);
 
@@ -42,10 +43,13 @@ function AuthGate() {
 
     if (!isAuthenticated && !inAuth) {
       router.replace("/(auth)/welcome");
-    } else if (isAuthenticated && !inApp) {
+    } else if (isAuthenticated && !hasOnboarded && !inAuth) {
+      // New users must complete onboarding before accessing the app
+      router.replace("/(auth)/theme-input");
+    } else if (isAuthenticated && hasOnboarded && !inApp) {
       router.replace("/(app)");
     }
-  }, [isAuthenticated, isLoading, segments, router]);
+  }, [isAuthenticated, hasOnboarded, isLoading, segments, router]);
 
   if (isLoading) {
     return (
