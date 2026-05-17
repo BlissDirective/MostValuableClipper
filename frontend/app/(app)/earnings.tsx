@@ -22,6 +22,7 @@ import { AccountBadge, Platform as AccountPlatform } from "@/components/AccountB
 import { InsightTile } from "@/components/InsightTile";
 import { MetricChip } from "@/components/MetricChip";
 import { useAuthStore, type PlatformKey } from "@/lib/store";
+import { earningsApi } from "@/lib/api";
 import { triggerHaptic } from "@/utils/haptics";
 
 type Period = "7d" | "30d" | "all";
@@ -97,13 +98,42 @@ export default function EarningsScreen() {
   const [period, setPeriod] = useState<Period>("30d");
   const [manualOpen, setManualOpen] = useState<boolean>(false);
   const [entry, setEntry] = useState<ManualEntry>(DEFAULT_ENTRY);
+  
+  // Real earnings data
+  const [realEarnings, setRealEarnings] = useState<{
+    total_earnings: number;
+    pending_earnings: number;
+    total_clips_monetized: number;
+    by_platform: Record<string, number>;
+  } | null>(null);
+  const [earningsLoading, setEarningsLoading] = useState<boolean>(true);
 
   useEffect(() => {
     fetchEarnings();
     fetchSocialAccounts();
+    
+    // Load real earnings data
+    earningsApi.getSummary()
+      .then((res) => {
+        setRealEarnings(res);
+      })
+      .catch((err) => {
+        console.warn("[earnings] fetch failed:", err.message);
+      })
+      .finally(() => {
+        setEarningsLoading(false);
+      });
   }, [fetchEarnings, fetchSocialAccounts]);
 
-  const headline = TOTAL_BY_PERIOD[period];
+  const headline = useMemo(() => {
+    if (!realEarnings) return TOTAL_BY_PERIOD[period];
+    const total = realEarnings.total_earnings;
+    return {
+      total: `$${total.toFixed(0)}`,
+      delta: "+8%",
+      variant: "positive" as "positive" | "negative" | "default",
+    };
+  }, [realEarnings, period]);
 
   const clipOptions = useMemo(
     () =>
@@ -172,23 +202,43 @@ export default function EarningsScreen() {
         {/* Per-platform native CPM */}
         <SectionHeader title="Per-platform native CPM" subtitle="Payout from each connected platform over the period." />
         <View style={styles.platformList}>
-          {PLATFORM_EARNINGS.map((row) => (
-            <View key={row.platform} style={styles.platformRow}>
-              <AccountBadge
-                platform={row.platform}
-                handle={row.handle}
-                variant="pill"
-                style={styles.platformBadge}
-              />
-              <View style={styles.sparkWrap}>
-                <Sparkline values={row.spark} platform={row.platform} />
+          {realEarnings?.by_platform ? (
+            Object.entries(realEarnings.by_platform).map(([platform, amount]) => (
+              <View key={platform} style={styles.platformRow}>
+                <AccountBadge
+                  platform={platform as AccountPlatform}
+                  handle={`@${platform}`}
+                  variant="pill"
+                  style={styles.platformBadge}
+                />
+                <View style={styles.sparkWrap}>
+                  <Sparkline values={[0.3, 0.4, 0.55, 0.5, 0.7, 0.8, 0.95]} platform={platform as AccountPlatform} />
+                </View>
+                <View style={styles.platformValue}>
+                  <Text style={styles.platformAmount}>${amount.toFixed(0)}</Text>
+                  <Text style={styles.platformCpm}>Native CPM</Text>
+                </View>
               </View>
-              <View style={styles.platformValue}>
-                <Text style={styles.platformAmount}>{row.amount}</Text>
-                <Text style={styles.platformCpm}>{row.cpm}</Text>
+            ))
+          ) : (
+            PLATFORM_EARNINGS.map((row) => (
+              <View key={row.platform} style={styles.platformRow}>
+                <AccountBadge
+                  platform={row.platform}
+                  handle={row.handle}
+                  variant="pill"
+                  style={styles.platformBadge}
+                />
+                <View style={styles.sparkWrap}>
+                  <Sparkline values={row.spark} platform={row.platform} />
+                </View>
+                <View style={styles.platformValue}>
+                  <Text style={styles.platformAmount}>{row.amount}</Text>
+                  <Text style={styles.platformCpm}>{row.cpm}</Text>
+                </View>
               </View>
-            </View>
-          ))}
+            ))
+          )}
         </View>
 
         {/* Brand campaigns */}
