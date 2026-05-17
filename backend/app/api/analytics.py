@@ -5,6 +5,7 @@ from datetime import datetime
 
 from app.services.auth import get_current_user
 from app.services.database import SupabaseService
+from app.services.hook_analysis_service import hook_analysis_service
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 db = SupabaseService()
@@ -111,3 +112,23 @@ async def get_pipeline_analytics(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get pipeline analytics: {str(e)}")
+
+@router.get("/hooks")
+async def get_hook_analysis(
+    days: int = 30,
+    user = Depends(get_current_user)
+):
+    """Get AI-powered hook archetype analysis for the user's clips.
+
+    Analyzes clip openings, classifies hook patterns dynamically,
+    correlates with performance metrics, and returns ranked archetypes
+    with retention deltas and generated insights.
+    """
+    try:
+        result = await hook_analysis_service.analyze_hooks(
+            user_id=user.id,
+            days=days
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to analyze hooks: {str(e)}")

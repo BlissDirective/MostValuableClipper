@@ -23,7 +23,7 @@ import { ActionButton } from "@/components/ActionButton";
 import { InsightTile } from "@/components/InsightTile";
 import { MetricChip } from "@/components/MetricChip";
 import { useAuthStore } from "@/lib/store";
-import { analyticsApi } from "@/lib/api";
+import { analyticsApi, type HookArchetype } from "@/lib/api";
 import { triggerHaptic } from "@/utils/haptics";
 
 interface DashboardData {
@@ -37,21 +37,6 @@ interface DashboardData {
     views: number;
   }>;
 }
-
-interface HookArchetype {
-  rank: number;
-  name: string;
-  retention: string;
-  variant: "positive" | "negative" | "neutral";
-}
-
-const HOOK_ARCHETYPES: HookArchetype[] = [
-  { rank: 1, name: "Question", retention: "+124%", variant: "positive" },
-  { rank: 2, name: "Pattern-break", retention: "+71%", variant: "positive" },
-  { rank: 3, name: "Promise", retention: "+22%", variant: "positive" },
-  { rank: 4, name: "Reaction", retention: "-4%", variant: "neutral" },
-  { rank: 5, name: "Statement", retention: "-38%", variant: "negative" },
-];
 
 interface CaptionStyle {
   name: string;
@@ -130,6 +115,10 @@ export default function InsightsScreen() {
   
   // Real data state
   const [data, setData] = useState<DashboardData | null>(null);
+  const [hooks, setHooks] = useState<HookArchetype[]>([]);
+  const [hookInsights, setHookInsights] = useState<string[]>([]);
+  const [criticCard, setCriticCard] = useState<string>("");
+  const [clipsAnalyzed, setClipsAnalyzed] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,10 +126,20 @@ export default function InsightsScreen() {
   const loadData = async () => {
     try {
       setError(null);
-      const res = await analyticsApi.getDashboard();
-      setData(res);
+      
+      // Fetch dashboard and hook analysis in parallel
+      const [dashboardRes, hooksRes] = await Promise.all([
+        analyticsApi.getDashboard(),
+        analyticsApi.getHookAnalysis(),
+      ]);
+      
+      setData(dashboardRes);
+      setHooks(hooksRes.archetypes || []);
+      setHookInsights(hooksRes.insights || []);
+      setCriticCard(hooksRes.critic_card || "");
+      setClipsAnalyzed(hooksRes.total_clips_analyzed || 0);
     } catch (err: any) {
-      setError(err.detail || "Failed to load analytics");
+      setError(err.detail || "Failed to load insights");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -242,10 +241,7 @@ export default function InsightsScreen() {
             <Text style={styles.criticOverline}>WEEK OF {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}</Text>
             <Text style={styles.criticHeadline}>What changed this week</Text>
             <Text style={styles.criticParagraph}>
-              Question-archetype hooks produced +124% 3-second retention versus statement hooks
-              across 47 clips. Caption length under 90 characters outperformed longer captions
-              by 31% on TikTok specifically. Posting between 6pm and 9pm local time correlates
-              with the highest first-hour velocity.
+              {criticCard || "Analyzing your clip performance... generate and post more clips to see AI-powered hook insights."}
             </Text>
             <View style={styles.criticFooter}>
               <View style={styles.applyRow}>
@@ -267,26 +263,44 @@ export default function InsightsScreen() {
         </View>
 
         {/* Hook archetypes — horizontal scroll */}
-        <SectionHeader title="Hook archetypes" subtitle="Ranked by 3-second retention, last 30 days." />
+        <SectionHeader 
+          title="Hook archetypes" 
+          subtitle={clipsAnalyzed > 0 
+            ? `Ranked by 3-second retention, last 30 days · ${clipsAnalyzed} clips analyzed.`
+            : "Ranked by 3-second retention, last 30 days."
+          } 
+        />
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.hookList}
         >
-          {HOOK_ARCHETYPES.map((h) => (
-            <View key={h.name} style={styles.hookCardWrap}>
-              <View style={styles.rankBadge}>
-                <Text style={styles.rankText}>#{h.rank}</Text>
+          {hooks.length > 0 ? (
+            hooks.map((h) => (
+              <View key={h.pattern_type} style={styles.hookCardWrap}>
+                <View style={styles.rankBadge}>
+                  <Text style={styles.rankText}>#{h.rank}</Text>
+                </View>
+                <InsightTile
+                  overline={`${h.archetype_name} · ${h.clip_count} clips`}
+                  headline={h.retention_delta_pct > 0 ? `+${h.retention_delta_pct.toFixed(0)}%` : `${h.retention_delta_pct.toFixed(0)}%`}
+                  body={`${h.description} vs. period average.`}
+                  variant={h.variant}
+                  style={styles.hookCard}
+                />
               </View>
+            ))
+          ) : (
+            <View style={[styles.hookCardWrap, { opacity: 0.6 }]}>
               <InsightTile
-                overline={`Hook · #${h.rank}`}
-                headline={h.retention}
-                body={`${h.name} hooks vs. period average.`}
-                variant={h.variant}
+                overline="AI Analysis"
+                headline="---"
+                body="Post 3+ clips to unlock dynamic hook archetype analysis."
+                variant="neutral"
                 style={styles.hookCard}
               />
             </View>
-          ))}
+          )}
         </ScrollView>
 
         {/* Best post times heatmap */}
