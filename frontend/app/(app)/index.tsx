@@ -121,7 +121,8 @@ export default function HomeScreen() {
           } else if (actionId === "delete") {
             deleteClip(item.id);
           } else {
-            console.log("[home] clip action", { id: item.id, actionId });
+            // Post-MVP: handle additional clip actions (share, edit, remix)
+            Alert.alert("Coming soon", `${actionId} will be available in a future update.`);
           }
         }}
       />

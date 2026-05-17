@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 
 from app.services.auth import get_current_user
 from app.services.database import SupabaseService
@@ -105,6 +106,35 @@ async def delete_account(user = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
 
+
+@router.get("/me/export")
+async def export_user_data(user = Depends(get_current_user)):
+    """Export all user data as JSON (GDPR/CCPA data portability)."""
+    try:
+        profile = await db.get_profile(user.id)
+        pipelines = await db.list_pipelines(user.id)
+        clips = await db.list_clips(user_id=user.id, limit=10000)
+        sources = await db.list_sources(user.id)
+        subscription = await db.get_subscription(user.id)
+        
+        export_data = {
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": profile.get("full_name") if profile else None,
+                "created_at": user.created_at if hasattr(user, 'created_at') else None,
+            },
+            "profile": profile,
+            "pipelines": pipelines.get("items", []),
+            "clips": clips.get("items", []),
+            "sources": sources.get("items", []),
+            "subscription": subscription,
+            "export_generated_at": datetime.utcnow().isoformat(),
+        }
+        
+        return export_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export data: {str(e)}")
 
 @router.get("/me/subscription")
 async def get_subscription(user = Depends(get_current_user)):

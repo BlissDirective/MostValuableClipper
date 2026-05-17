@@ -26,7 +26,6 @@ export default function ConnectAccountsScreen() {
   const togglePlatform = useAuthStore((s) => s.togglePlatform);
 
   const onConnect = (p: PlatformKey) => {
-    console.log("[onboarding] toggle platform", p);
     togglePlatform(p);
   };
 

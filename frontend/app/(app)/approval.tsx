@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Check, ChevronLeft, Edit3, Sparkles, X } from "lucide-react-native";
@@ -81,11 +81,11 @@ export default function ApprovalScreen() {
   );
 
   const onEdit = useCallback(() => {
-    console.log("[approval] open editor", { id: current?.clip.id });
+    Alert.alert("Coming soon", "Clip editing will be available in a future update.");
   }, [current]);
 
   const onRemix = useCallback(() => {
-    console.log("[approval] remix tapped", { id: current?.clip.id });
+    Alert.alert("Coming soon", "Clip remixing will be available in a future update.");
   }, [current]);
 
   const topBanner = useMemo(() => current?.safetyFlags?.[0], [current]);

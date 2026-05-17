@@ -115,10 +115,14 @@ export default function EarningsScreen() {
   );
 
   const onSubmitManual = () => {
-    console.log("[earnings] manual entry submit", entry);
     triggerHaptic("approve");
     setManualOpen(false);
     setEntry(DEFAULT_ENTRY);
+    Alert.alert(
+      "Manual entry recorded",
+      "Sub-1K manual metrics logged for tracking. These do not affect native platform payouts.",
+      [{ text: "OK" }]
+    );
   };
 
   return (

@@ -14,9 +14,8 @@ export default function ThemeInputScreen() {
 
   const onContinue = useCallback(() => {
     if (!canContinue) return;
-    console.log("[onboarding] theme submitted", theme);
     router.push("/(auth)/connect-accounts");
-  }, [canContinue, theme]);
+  }, [canContinue]);
 
   return (
     <View style={styles.root}>

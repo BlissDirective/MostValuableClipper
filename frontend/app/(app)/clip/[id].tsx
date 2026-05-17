@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -96,7 +97,6 @@ export default function ClipDetailScreen() {
 
   const handleAction = useCallback(
     async (action: string) => {
-      console.log(`[clip-detail] ${action}`, { id: clip.id });
       if (action === "delete") {
         try {
           await clipsApi.delete(clip.id);
@@ -104,6 +104,9 @@ export default function ClipDetailScreen() {
         } catch (err: any) {
           console.warn("[clip-detail] delete failed:", err.message);
         }
+      } else {
+        // Post-MVP: edit and repost actions require AI generation pipeline
+        Alert.alert("Coming soon", `${action === "edit" ? "Clip editing" : "Reposting"} will be available in a future update.`);
       }
     },
     [clip.id, router]

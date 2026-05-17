@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View, Linking, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -97,7 +97,8 @@ export default function ProfileScreen() {
                     variant={connected[p.key] ? "ghost" : "secondary"}
                     size="sm"
                     onPress={() => {
-                      console.log("[profile] toggle account", p.key);
+                      // Social OAuth connection requires platform developer accounts.
+                      // Post-MVP: Implement OAuth flow and backend token exchange.
                       togglePlatform(p.key);
                     }}
                   />
@@ -113,12 +114,22 @@ export default function ProfileScreen() {
           <LinkRow
             icon={CircleHelp}
             label="Help & support"
-            onPress={() => console.log("[profile] open help — stub")}
+            onPress={() => {
+              const url = process.env.EXPO_PUBLIC_API_BASE_URL?.replace('/api/v1', '') || 'http://localhost:8000';
+              Linking.openURL(`${url}/help`).catch(() => {
+                Alert.alert("Help Center", "Visit our help center at support@blissclip.app");
+              });
+            }}
           />
           <LinkRow
             icon={FileText}
             label="About / Legal"
-            onPress={() => console.log("[profile] open legal — stub")}
+            onPress={() => {
+              const url = process.env.EXPO_PUBLIC_API_BASE_URL?.replace('/api/v1', '') || 'http://localhost:8000';
+              Linking.openURL(`${url}/legal/privacy`).catch(() => {
+                Alert.alert("Legal", "Privacy policy and terms available in web dashboard.");
+              });
+            }}
             last
           />
         </View>

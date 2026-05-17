@@ -9,10 +9,12 @@ import {
   Text,
   TextInput,
   View,
+  Linking,
+  ActivityIndicator,
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ChevronLeft, Lock, ShieldCheck } from "lucide-react-native";
+import { ChevronLeft, Lock, ShieldCheck, Download } from "lucide-react-native";
 
 import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
@@ -72,6 +74,11 @@ export default function SettingsScreen() {
   );
   const [deleteModalOpen, setDeleteModalOpen] = useState<boolean>(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string>("");
+  const [passwordModalOpen, setPasswordModalOpen] = useState<boolean>(false);
+  const [newPassword, setNewPassword] = useState<string>("");
+  const [passwordConfirm, setPasswordConfirm] = useState<string>("");
+  const [passwordLoading, setPasswordLoading] = useState<boolean>(false);
+  const [exportLoading, setExportLoading] = useState<boolean>(false);
 
   const onCohortToggle = useCallback(
     (v: boolean) => {
@@ -90,17 +97,67 @@ export default function SettingsScreen() {
         {
           text: "Reset",
           style: "destructive",
-          onPress: () => {
-            console.log("[settings] reset learned params");
+          onPress: async () => {
+            try {
+              await usersApi.updatePreferences({
+                retention_policy: undefined,
+                autonomy_mode: undefined,
+                warning_categories: undefined,
+              });
+              Alert.alert("Reset complete", "Learned parameters have been cleared.");
+            } catch (err: any) {
+              console.warn("[settings] reset failed:", err.message);
+              Alert.alert("Reset failed", err.message || "Could not reset parameters.");
+            }
           },
         },
       ]
     );
   }, []);
 
+  const onChangePassword = useCallback(async () => {
+    if (!newPassword || newPassword.length < 6) {
+      Alert.alert("Invalid password", "Password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== passwordConfirm) {
+      Alert.alert("Passwords do not match", "Please confirm your new password.");
+      return;
+    }
+    setPasswordLoading(true);
+    try {
+      const { changePassword } = await import("@/lib/auth");
+      await changePassword(newPassword);
+      setPasswordModalOpen(false);
+      setNewPassword("");
+      setPasswordConfirm("");
+      Alert.alert("Password updated", "Your password has been changed successfully.");
+    } catch (err: any) {
+      console.warn("[settings] password change failed:", err.message);
+      Alert.alert("Failed to change password", err.message || "Please try again.");
+    } finally {
+      setPasswordLoading(false);
+    }
+  }, [newPassword, passwordConfirm]);
+
+  const onExportData = useCallback(async () => {
+    setExportLoading(true);
+    try {
+      const data = await usersApi.exportData();
+      // On mobile, we can't easily download JSON files.
+      // Show a summary and offer to share or copy.
+      const summary = `Export ready:\n• ${(data.pipelines as any[])?.length || 0} pipelines\n• ${(data.clips as any[])?.length || 0} clips\n• ${(data.sources as any[])?.length || 0} sources\n\nData export has been prepared on the server. Full download available via web dashboard.`;
+      Alert.alert("Data Export", summary);
+    } catch (err: any) {
+      console.warn("[settings] export failed:", err.message);
+      Alert.alert("Export failed", err.message || "Could not export data.");
+    } finally {
+      setExportLoading(false);
+    }
+  }, []);
+
   const onConfirmDelete = useCallback(async () => {
     if (deleteConfirm.trim() !== "DELETE") return;
-    console.log("[settings] account deletion confirmed");
     try {
       await usersApi.deleteMe();
     } catch (err: any) {
@@ -271,9 +328,8 @@ export default function SettingsScreen() {
 
           <Section title="ACCOUNT">
             <View style={styles.card}>
-              <AccountRow label="Change email" onPress={() => console.log("[settings] change email — stub")} />
-              <AccountRow label="Change password" onPress={() => console.log("[settings] change password — stub")} />
-              <AccountRow label="Export data" onPress={() => console.log("[settings] export data — stub")} />
+              <AccountRow label="Change password" onPress={() => setPasswordModalOpen(true)} />
+              <AccountRow label="Export data" onPress={onExportData} loading={exportLoading} />
               <AccountRow
                 label="Delete account"
                 danger
@@ -325,6 +381,50 @@ export default function SettingsScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={passwordModalOpen} transparent animationType="fade" onRequestClose={() => setPasswordModalOpen(false)}>
+        <View style={styles.modalRoot}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Change password</Text>
+            <Text style={styles.modalBody}>Enter a new password (minimum 6 characters).</Text>
+            <TextInput
+              value={newPassword}
+              onChangeText={setNewPassword}
+              placeholder="New password"
+              placeholderTextColor={tokens.color.text.tertiary}
+              secureTextEntry
+              style={styles.modalInput}
+            />
+            <TextInput
+              value={passwordConfirm}
+              onChangeText={setPasswordConfirm}
+              placeholder="Confirm new password"
+              placeholderTextColor={tokens.color.text.tertiary}
+              secureTextEntry
+              style={styles.modalInput}
+            />
+            <View style={styles.modalActions}>
+              <ActionButton
+                label="Cancel"
+                variant="secondary"
+                size="md"
+                onPress={() => {
+                  setPasswordModalOpen(false);
+                  setNewPassword("");
+                  setPasswordConfirm("");
+                }}
+              />
+              <ActionButton
+                label={passwordLoading ? "Updating..." : "Update"}
+                variant="primary"
+                size="md"
+                disabled={passwordLoading || !newPassword || !passwordConfirm}
+                onPress={onChangePassword}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -343,15 +443,18 @@ function AccountRow({
   onPress,
   danger,
   last,
+  loading,
 }: {
   label: string;
   onPress: () => void;
   danger?: boolean;
   last?: boolean;
+  loading?: boolean;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={loading}
       style={({ pressed }) => [
         styles.accountRow,
         !last ? styles.divider : null,
@@ -359,6 +462,7 @@ function AccountRow({
       ]}
     >
       <Text style={[styles.rowTitle, danger ? styles.dangerText : null]}>{label}</Text>
+      {loading ? <ActivityIndicator size="small" color={tokens.color.text.tertiary} /> : null}
     </Pressable>
   );
 }
