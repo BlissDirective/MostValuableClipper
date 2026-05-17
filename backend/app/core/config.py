@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     
     # ============================================
+    # Zernio (Unified Social API)
+    # ============================================
+    ZERNIO_API_KEY: Optional[str] = None
+
+    # ============================================
     # Social Platform OAuth (Phase 2 — optional)
     # ============================================
     TIKTOK_CLIENT_ID: Optional[str] = None

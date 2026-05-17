@@ -104,6 +104,47 @@ export default function ClipDetailScreen() {
         } catch (err: any) {
           console.warn("[clip-detail] delete failed:", err.message);
         }
+      } else if (action === "post") {
+        // Post clip to social platforms via Zernio
+        Alert.alert(
+          "Post Clip",
+          "Which platforms would you like to post to?",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "All Platforms",
+              onPress: async () => {
+                try {
+                  const result = await clipsApi.post(clip.id, ["tiktok", "instagram", "youtube"]);
+                  if (result.data.success) {
+                    Alert.alert(
+                      "Posted!",
+                      `Clip posted to ${Object.keys(result.data.platforms).length} platforms via Zernio.`
+                    );
+                  } else {
+                    Alert.alert("Post Failed", "Could not post clip. Please try again.");
+                  }
+                } catch (err: any) {
+                  console.warn("[clip-detail] post failed:", err.message);
+                  Alert.alert("Post Failed", err.message || "Unknown error");
+                }
+              }
+            },
+            {
+              text: "TikTok Only",
+              onPress: async () => {
+                try {
+                  const result = await clipsApi.post(clip.id, ["tiktok"]);
+                  if (result.data.success) {
+                    Alert.alert("Posted!", "Clip posted to TikTok via Zernio.");
+                  }
+                } catch (err: any) {
+                  Alert.alert("Post Failed", err.message || "Unknown error");
+                }
+              }
+            }
+          ]
+        );
       } else {
         // Post-MVP: edit and repost actions require AI generation pipeline
         Alert.alert("Coming soon", `${action === "edit" ? "Clip editing" : "Reposting"} will be available in a future update.`);
@@ -201,18 +242,18 @@ export default function ClipDetailScreen() {
         <SafeAreaView edges={["bottom"]} style={styles.footer}>
           <View style={styles.footerRow}>
             <ActionButton
+              label="Post"
+              variant="primary"
+              size="md"
+              iconLeft={Repeat}
+              onPress={() => handleAction("post")}
+            />
+            <ActionButton
               label="Edit"
               variant="secondary"
               size="md"
               iconLeft={Pencil}
               onPress={() => handleAction("edit")}
-            />
-            <ActionButton
-              label="Repost"
-              variant="primary"
-              size="md"
-              iconLeft={Repeat}
-              onPress={() => handleAction("repost")}
             />
             <ActionButton
               label="Kill"

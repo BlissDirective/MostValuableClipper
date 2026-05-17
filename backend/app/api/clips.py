@@ -11,6 +11,7 @@ from app.services.database import SupabaseService
 from app.services.queue import QueueService
 from app.services.scheduler import PostScheduler
 from app.services.r2_service import R2Service
+from app.services.zernio_service import ZernioService
 from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/clips", tags=["clips"])
@@ -35,6 +36,13 @@ db = SupabaseService()
 queue = QueueService()
 scheduler = PostScheduler()
 r2 = R2Service()
+
+# Initialize Zernio service if key is configured
+zernio: Optional[ZernioService] = None
+try:
+    zernio = ZernioService()
+except ValueError:
+    zernio = None
 
 @router.get("", response_model=ClipListResponse)
 async def list_clips(
@@ -226,10 +234,10 @@ async def post_clip(
     request: PostRequest,
     user = Depends(get_current_user)
 ):
-    """Post an approved clip to selected platforms immediately.
+    """Post an approved clip to selected platforms immediately via Zernio.
     
-    Note: Full social posting requires platform OAuth tokens.
-    This endpoint verifies connected accounts and queues the post.
+    If Zernio is configured, posts immediately with rate limit handling.
+    Otherwise, falls back to queueing for background worker.
     """
     try:
         clip = await db.get_clip(clip_id)
@@ -239,15 +247,51 @@ async def post_clip(
         if clip.get("user_id") != user.id:
             raise HTTPException(status_code=403, detail="Not authorized")
         
-        # Get connected social accounts
-        accounts = await db.list_social_accounts(user.id)
-        connected_platforms = {a.get("platform") for a in accounts if a.get("status") == "active"}
+        video_url = clip.get("video_url")
+        if not video_url:
+            raise HTTPException(status_code=400, detail="Clip has no video URL")
         
-        # Check which requested platforms are connected
-        results = []
-        for platform in request.platforms:
-            if platform.value in connected_platforms:
-                # Queue the post for the worker
+        # Map platforms to Zernio format
+        zernio_platforms = [ZernioService.map_platform_to_zernio(p.value) for p in request.platforms]
+        
+        if zernio:
+            # Post via Zernio immediately
+            result = await zernio.post_clip(
+                video_url=video_url,
+                caption=clip.get("caption", ""),
+                platforms=zernio_platforms,
+                hashtags=clip.get("tags", [])
+            )
+            
+            # Update clip with post IDs
+            platform_posts = {}
+            for platform_result in result.get("platforms", []):
+                platform_name = ZernioService.map_zernio_to_platform(platform_result.get("platform", ""))
+                platform_posts[platform_name] = {
+                    "platform": platform_name,
+                    "post_id": platform_result.get("post_id"),
+                    "post_url": platform_result.get("post_url"),
+                    "status": "posted" if platform_result.get("success") else "failed",
+                    "metrics": {}
+                }
+            
+            await db.update_clip(clip_id, {
+                "platform_posts": platform_posts,
+                "status": "posted",
+                "posted_at": "now()"
+            })
+            
+            return {
+                "success": True,
+                "clip_id": clip_id,
+                "platforms": platform_posts,
+                "zernio_post_id": result.get("post_id"),
+                "posted_via": "zernio"
+            }
+        else:
+            # Fallback: queue for background worker
+            results = []
+            for platform in request.platforms:
                 await queue.enqueue("social_post", {
                     "clip_id": clip_id,
                     "platform": platform.value,
@@ -255,17 +299,15 @@ async def post_clip(
                     "scheduled": False
                 })
                 results.append({"platform": platform.value, "status": "queued"})
-            else:
-                results.append({"platform": platform.value, "status": "not_connected"})
-        
-        # Update clip status
-        await db.update_clip(clip_id, {"status": "scheduled"})
-        
-        return {
-            "success": True,
-            "clip_id": clip_id,
-            "results": results
-        }
+            
+            await db.update_clip(clip_id, {"status": "scheduled"})
+            
+            return {
+                "success": True,
+                "clip_id": clip_id,
+                "results": results,
+                "posted_via": "queue"
+            }
     except HTTPException:
         raise
     except Exception as e:

@@ -3,153 +3,18 @@ import httpx
 from typing import Dict, Any, Optional, List
 from app.core.config import settings
 from app.services.database import SupabaseService
+from app.services.zernio_service import ZernioService
 
 class SocialPostingService:
-    """Post clips to social media platforms."""
+    """Post clips to social media platforms via Zernio unified API."""
     
     def __init__(self):
         self.db = SupabaseService()
-    
-    async def post_to_tiktok(
-        self,
-        clip_id: str,
-        video_path: str,
-        caption: str,
-        hashtags: List[str],
-        access_token: str
-    ) -> Dict[str, Any]:
-        """Post a clip to TikTok."""
+        self.zernio: Optional[ZernioService] = None
         try:
-            # TikTok requires video upload via their API
-            # Step 1: Initialize upload
-            async with httpx.AsyncClient() as client:
-                init_response = await client.post(
-                    "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    json={
-                        "source_info": {
-                            "source": "PULL_FROM_URL",
-                            "url": video_path  # Must be a publicly accessible URL
-                        },
-                        "title": caption,
-                        "privacy_level": "PUBLIC",
-                        "disable_duet": False,
-                        "disable_comment": False,
-                        "disable_stitch": False
-                    },
-                    timeout=60
-                )
-                
-                init_response.raise_for_status()
-                data = init_response.json()
-                
-                if data.get("error", {}).get("code") != "ok":
-                    raise Exception(f"TikTok init failed: {data}")
-                
-                publish_id = data["data"]["publish_id"]
-                
-                return {
-                    "success": True,
-                    "platform": "tiktok",
-                    "publish_id": publish_id,
-                    "status": "published"
-                }
-        except Exception as e:
-            return {
-                "success": False,
-                "platform": "tiktok",
-                "error": str(e)
-            }
-    
-    async def post_to_instagram(
-        self,
-        clip_id: str,
-        video_path: str,
-        caption: str,
-        access_token: str,
-        account_id: str
-    ) -> Dict[str, Any]:
-        """Post a clip to Instagram (via Graph API)."""
-        try:
-            async with httpx.AsyncClient() as client:
-                # Step 1: Create media container
-                container_response = await client.post(
-                    f"https://graph.facebook.com/v18.0/{account_id}/media",
-                    params={
-                        "access_token": access_token,
-                        "media_type": "REELS",
-                        "video_url": video_path,
-                        "caption": caption,
-                        "share_to_feed": True
-                    },
-                    timeout=60
-                )
-                
-                container_response.raise_for_status()
-                container_data = container_response.json()
-                
-                if "id" not in container_data:
-                    raise Exception(f"Instagram container creation failed: {container_data}")
-                
-                creation_id = container_data["id"]
-                
-                # Step 2: Publish the container
-                publish_response = await client.post(
-                    f"https://graph.facebook.com/v18.0/{account_id}/media_publish",
-                    params={
-                        "access_token": access_token,
-                        "creation_id": creation_id
-                    },
-                    timeout=60
-                )
-                
-                publish_response.raise_for_status()
-                publish_data = publish_response.json()
-                
-                return {
-                    "success": True,
-                    "platform": "instagram",
-                    "media_id": publish_data.get("id"),
-                    "status": "published"
-                }
-        except Exception as e:
-            return {
-                "success": False,
-                "platform": "instagram",
-                "error": str(e)
-            }
-    
-    async def post_to_youtube(
-        self,
-        clip_id: str,
-        video_path: str,
-        title: str,
-        description: str,
-        tags: List[str],
-        access_token: str
-    ) -> Dict[str, Any]:
-        """Post a clip to YouTube Shorts."""
-        try:
-            # YouTube Data API v3 requires OAuth 2.0
-            # This is a simplified version - full implementation would use Google API client
-            async with httpx.AsyncClient() as client:
-                # First, upload the video
-                # Note: YouTube upload is complex and typically requires resumable uploads
-                # This is a placeholder for the actual implementation
-                
-                return {
-                    "success": True,
-                    "platform": "youtube",
-                    "video_id": "placeholder",
-                    "status": "published",
-                    "note": "YouTube upload requires resumable upload implementation"
-                }
-        except Exception as e:
-            return {
-                "success": False,
-                "platform": "youtube",
-                "error": str(e)
-            }
+            self.zernio = ZernioService()
+        except ValueError:
+            self.zernio = None
     
     async def post_clip(
         self,
@@ -160,18 +25,106 @@ class SocialPostingService:
         hashtags: List[str],
         title: str = ""
     ) -> Dict[str, Any]:
-        """Post a clip to a specific platform."""
-        # Get platform access token from database
-        # account = await self.db.get_social_account(clip_id, platform)
-        # access_token = account["access_token"]
+        """Post a clip to a specific platform via Zernio."""
+        if not self.zernio:
+            return {
+                "success": False,
+                "platform": platform,
+                "error": "Zernio not configured. Set ZERNIO_API_KEY to enable social posting."
+            }
         
-        # For now, return placeholder
-        return {
-            "success": False,
-            "platform": platform,
-            "error": "Social posting requires platform OAuth setup",
-            "note": "Complete OAuth flow to enable posting"
-        }
+        try:
+            zernio_platform = ZernioService.map_platform_to_zernio(platform)
+            result = await self.zernio.post_clip(
+                video_url=video_url,
+                caption=caption,
+                platforms=[zernio_platform],
+                hashtags=hashtags,
+                title=title
+            )
+            
+            # Extract platform-specific result
+            platform_result = next(
+                (p for p in result.get("platforms", []) 
+                 if ZernioService.map_zernio_to_platform(p.get("platform", "")) == platform),
+                None
+            )
+            
+            if platform_result and platform_result.get("success"):
+                return {
+                    "success": True,
+                    "platform": platform,
+                    "post_id": platform_result.get("post_id"),
+                    "post_url": platform_result.get("post_url"),
+                    "status": "published"
+                }
+            else:
+                return {
+                    "success": False,
+                    "platform": platform,
+                    "error": platform_result.get("error") if platform_result else "Unknown error"
+                }
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "platform": platform,
+                "error": str(e)
+            }
+    
+    async def post_to_multiple_platforms(
+        self,
+        clip_id: str,
+        video_url: str,
+        caption: str,
+        platforms: List[str],
+        hashtags: List[str],
+        title: str = ""
+    ) -> Dict[str, Any]:
+        """Post a clip to multiple platforms in one Zernio call."""
+        if not self.zernio:
+            return {
+                "success": False,
+                "error": "Zernio not configured. Set ZERNIO_API_KEY to enable social posting.",
+                "platforms": {p: {"success": False, "error": "Zernio not configured"} for p in platforms}
+            }
+        
+        try:
+            zernio_platforms = [ZernioService.map_platform_to_zernio(p) for p in platforms]
+            result = await self.zernio.post_clip(
+                video_url=video_url,
+                caption=caption,
+                platforms=zernio_platforms,
+                hashtags=hashtags,
+                title=title
+            )
+            
+            platform_results = {}
+            for platform_result in result.get("platforms", []):
+                platform_name = ZernioService.map_zernio_to_platform(platform_result.get("platform", ""))
+                platform_results[platform_name] = {
+                    "success": platform_result.get("success", False),
+                    "post_id": platform_result.get("post_id"),
+                    "post_url": platform_result.get("post_url"),
+                    "status": "posted" if platform_result.get("success") else "failed",
+                    "error": platform_result.get("error")
+                }
+            
+            all_success = all(r.get("success", False) for r in platform_results.values())
+            
+            return {
+                "success": all_success,
+                "clip_id": clip_id,
+                "zernio_post_id": result.get("post_id"),
+                "platforms": platform_results
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "platforms": {p: {"success": False, "error": str(e)} for p in platforms}
+            }
     
     async def schedule_post(
         self,
@@ -179,69 +132,90 @@ class SocialPostingService:
         platform: str,
         scheduled_time: str
     ) -> Dict[str, Any]:
-        """Schedule a clip to be posted at a specific time."""
-        # Store in database for background worker to pick up
-        # await self.db.update_clip(clip_id, {
-        #     "scheduled_post_time": scheduled_time,
-        #     "status": "approved"
-        # })
+        """Schedule a clip to be posted at a specific time via Zernio."""
+        if not self.zernio:
+            return {
+                "success": False,
+                "error": "Zernio not configured. Set ZERNIO_API_KEY to enable scheduling."
+            }
         
-        return {
-            "success": True,
-            "clip_id": clip_id,
-            "platform": platform,
-            "scheduled_time": scheduled_time,
-            "status": "scheduled"
-        }
+        try:
+            clip = await self.db.get_clip(clip_id)
+            if not clip:
+                return {"success": False, "error": "Clip not found"}
+            
+            zernio_platform = ZernioService.map_platform_to_zernio(platform)
+            result = await self.zernio.post_clip(
+                video_url=clip.get("video_url", ""),
+                caption=clip.get("caption", ""),
+                platforms=[zernio_platform],
+                schedule_time=scheduled_time,
+                hashtags=clip.get("tags", [])
+            )
+            
+            return {
+                "success": True,
+                "clip_id": clip_id,
+                "platform": platform,
+                "scheduled_time": scheduled_time,
+                "zernio_post_id": result.get("post_id"),
+                "status": "scheduled"
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def get_post_status(self, post_id: str) -> Dict[str, Any]:
+        """Check status of a posted clip via Zernio."""
+        if not self.zernio:
+            return {"error": "Zernio not configured"}
+        
+        try:
+            return await self.zernio.get_post_status(post_id)
+        except Exception as e:
+            return {"error": str(e)}
+
 
 class MetricsSyncService:
-    """Sync metrics from social platforms."""
+    """Sync metrics from social platforms via Zernio."""
     
-    async def sync_tiktok_metrics(self, access_token: str, video_id: str) -> Dict[str, Any]:
-        """Get TikTok video metrics."""
+    def __init__(self):
+        self.zernio: Optional[ZernioService] = None
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    "https://open.tiktokapis.com/v2/video/query/",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    json={
-                        "filters": {"video_ids": [video_id]}
-                    },
-                    timeout=30
-                )
-                
-                response.raise_for_status()
-                data = response.json()
-                
-                return {
-                    "views": data["data"]["videos"][0].get("view_count", 0),
-                    "likes": data["data"]["videos"][0].get("like_count", 0),
-                    "comments": data["data"]["videos"][0].get("comment_count", 0),
-                    "shares": data["data"]["videos"][0].get("share_count", 0)
-                }
+            self.zernio = ZernioService()
+        except ValueError:
+            self.zernio = None
+    
+    async def sync_platform_metrics(
+        self,
+        account_id: str,
+        post_ids: Optional[List[str]] = None,
+        since: Optional[str] = None,
+        until: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get metrics for posts on a connected account via Zernio."""
+        if not self.zernio:
+            return {"error": "Zernio not configured. Set ZERNIO_API_KEY to enable metrics sync."}
+        
+        try:
+            return await self.zernio.get_metrics(
+                account_id=account_id,
+                post_ids=post_ids,
+                since=since,
+                until=until
+            )
         except Exception as e:
             return {"error": str(e)}
     
-    async def sync_instagram_metrics(self, access_token: str, media_id: str) -> Dict[str, Any]:
-        """Get Instagram media metrics."""
+    async def delete_post(self, post_id: str) -> Dict[str, Any]:
+        """Delete a posted clip from platforms via Zernio."""
+        if not self.zernio:
+            return {"error": "Zernio not configured"}
+        
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"https://graph.facebook.com/v18.0/{media_id}/insights",
-                    params={
-                        "access_token": access_token,
-                        "metric": "engagement,impressions,reach,saved"
-                    },
-                    timeout=30
-                )
-                
-                response.raise_for_status()
-                data = response.json()
-                
-                metrics = {}
-                for item in data.get("data", []):
-                    metrics[item["name"]] = item["values"][0]["value"]
-                
-                return metrics
+            return await self.zernio.delete_post(post_id)
         except Exception as e:
             return {"error": str(e)}
