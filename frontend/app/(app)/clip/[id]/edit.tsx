@@ -24,6 +24,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
+import TimelineScrubber, { Thumbnail } from "@/components/TimelineScrubber";
 import { clipsApi, Clip } from "@/lib/api";
 
 interface EditRecipe {
@@ -46,10 +47,15 @@ export default function ClipEditScreen() {
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   
+  // Timeline thumbnails
+  const [thumbnails, setThumbnails] = useState<Thumbnail[]>([]);
+  const [clipDuration, setClipDuration] = useState<number>(30);
+  const [thumbsLoading, setThumbsLoading] = useState<boolean>(false);
+  
   // Edit state
   const [caption, setCaption] = useState<string>("");
-  const [startTime, setStartTime] = useState<string>("0");
-  const [endTime, setEndTime] = useState<string>("30");
+  const [startTime, setStartTime] = useState<number>(0);
+  const [endTime, setEndTime] = useState<number>(30);
   const [speed, setSpeed] = useState<string>("1.0");
   const [audioMode, setAudioMode] = useState<"keep" | "mute">("keep");
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
@@ -62,11 +68,30 @@ export default function ClipEditScreen() {
     if (!params.id) return;
     let cancelled = false;
     setLoading(true);
-    clipsApi.getById(params.id)
-      .then((res) => {
-        if (!cancelled) {
-          setClip(res.data);
-          setCaption(res.data.caption || "");
+    
+    // Fetch clip and thumbnails
+    Promise.all([
+      clipsApi.getById(params.id),
+      clipsApi.thumbnails(params.id)
+    ])
+      .then(([clipRes, thumbRes]) => {
+        if (cancelled) return;
+        const clipData = clipRes.data;
+        setClip(clipData);
+        setCaption(clipData.caption || "");
+        
+        // Set default end time from clip duration
+        const duration = clipData.duration || 30;
+        setClipDuration(duration);
+        setEndTime(duration);
+        
+        // Set thumbnails
+        if (thumbRes.data.thumbnails) {
+          setThumbnails(thumbRes.data.thumbnails);
+        }
+        if (thumbRes.data.duration) {
+          setClipDuration(thumbRes.data.duration);
+          setEndTime(thumbRes.data.duration);
         }
       })
       .catch((err) => {
@@ -82,10 +107,8 @@ export default function ClipEditScreen() {
     const recipe: EditRecipe = {};
     
     // Trim
-    const start = parseFloat(startTime) || 0;
-    const end = parseFloat(endTime) || 30;
-    if (start > 0 || end < 60) {
-      recipe.trim = { start_seconds: start, end_seconds: end };
+    if (startTime > 0 || endTime < clipDuration) {
+      recipe.trim = { start_seconds: startTime, end_seconds: endTime };
     }
     
     // Caption
@@ -127,7 +150,7 @@ export default function ClipEditScreen() {
     }
     
     return recipe;
-  }, [startTime, endTime, caption, clip, speed, audioMode, selectedFilters, textOverlays]);
+  }, [startTime, endTime, clipDuration, caption, clip, speed, audioMode, selectedFilters, textOverlays]);
 
   const onSave = useCallback(async () => {
     if (!params.id || saving) return;
@@ -211,19 +234,36 @@ export default function ClipEditScreen() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Trim Section */}
+        {/* Trim Section with Timeline Scrubber */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Scissors size={tokens.icon.size.sm} color={tokens.color.brand.indigo[500]} />
             <Text style={styles.sectionTitle}>Trim</Text>
           </View>
+          
+          {thumbnails.length > 0 ? (
+            <TimelineScrubber
+              thumbnails={thumbnails}
+              duration={clipDuration}
+              startTime={startTime}
+              endTime={endTime}
+              onStartTimeChange={setStartTime}
+              onEndTimeChange={setEndTime}
+            />
+          ) : (
+            <View style={styles.thumbsLoading}>
+              <ActivityIndicator size="small" color={tokens.color.brand.indigo[500]} />
+              <Text style={styles.thumbsLoadingText}>Generating preview...</Text>
+            </View>
+          )}
+          
           <View style={styles.row}>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Start (s)</Text>
               <TextInput
                 style={styles.input}
-                value={startTime}
-                onChangeText={setStartTime}
+                value={startTime.toFixed(1)}
+                onChangeText={(v) => setStartTime(parseFloat(v) || 0)}
                 keyboardType="numeric"
                 placeholder="0"
               />
@@ -232,10 +272,10 @@ export default function ClipEditScreen() {
               <Text style={styles.label}>End (s)</Text>
               <TextInput
                 style={styles.input}
-                value={endTime}
-                onChangeText={setEndTime}
+                value={endTime.toFixed(1)}
+                onChangeText={(v) => setEndTime(parseFloat(v) || clipDuration)}
                 keyboardType="numeric"
-                placeholder="30"
+                placeholder={clipDuration.toString()}
               />
             </View>
           </View>
@@ -604,6 +644,19 @@ const styles = StyleSheet.create({
   },
   addBtn: {
     padding: tokens.spacing.xs,
+  },
+  thumbsLoading: {
+    height: 72,
+    borderRadius: tokens.radius.md,
+    backgroundColor: tokens.color.bg.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: tokens.spacing.xs,
+  },
+  thumbsLoadingText: {
+    fontFamily: tokens.type.scale.caption.family,
+    fontSize: tokens.type.scale.caption.size,
+    color: tokens.color.text.tertiary,
   },
   footer: {
     padding: tokens.spacing.md,

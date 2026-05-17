@@ -453,3 +453,52 @@ async def get_edit_status(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get edit status: {str(e)}")
+
+
+@router.post("/{clip_id}/thumbnails")
+async def get_thumbnails(
+    clip_id: str,
+    count: int = 20,
+    user = Depends(get_current_user)
+):
+    """Generate thumbnail frames for timeline scrubber.
+    
+    Returns evenly spaced thumbnail images from the clip video.
+    """
+    try:
+        from app.services.thumbnail_service import ThumbnailService
+        
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        video_url = clip.get("video_url")
+        if not video_url:
+            raise HTTPException(status_code=400, detail="Clip has no video URL")
+        
+        thumbnail_service = ThumbnailService()
+        result = await thumbnail_service.get_or_create_thumbnails(
+            clip_id=clip_id,
+            video_url=video_url,
+            count=count
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Thumbnail generation failed"))
+        
+        return {
+            "success": True,
+            "clip_id": clip_id,
+            "thumbnails": result["thumbnails"],
+            "duration": result.get("duration"),
+            "count": result["count"],
+            "cached": result.get("cached", False)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate thumbnails: {str(e)}")
