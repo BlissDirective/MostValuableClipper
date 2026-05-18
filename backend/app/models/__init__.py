@@ -184,3 +184,31 @@ class ClipRevision(BaseModel):
     new_state: Dict[str, Any]
     metadata: Optional[Dict[str, Any]] = {}
     created_at: str
+
+# ============================================
+# CLIP EDITING MODELS
+# ============================================
+class ClipEditRequest(BaseModel):
+    """Edit recipe for clip modification via FFmpeg."""
+    trim: Optional[dict] = None
+    segments: Optional[List[dict]] = None
+    caption: Optional[str] = None
+    caption_style: Optional[dict] = None
+    audio: Optional[str] = "keep"
+    speed: Optional[float] = 1.0
+    filters: Optional[List[str]] = None
+    text_overlays: Optional[List[dict]] = None
+    transitions: Optional[List[str]] = None
+    stickers: Optional[List[dict]] = None
+
+class ClipEditJob(BaseModel):
+    """Queued clip edit job status."""
+    job_id: str
+    clip_id: str
+    user_id: str
+    status: str
+    recipe: ClipEditRequest
+    result_url: Optional[str] = None
+    error: Optional[str] = None
+    created_at: str
+    completed_at: Optional[str] = None

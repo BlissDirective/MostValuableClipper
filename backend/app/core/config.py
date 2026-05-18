@@ -99,7 +99,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
-        extra = "ignore"  # ignore unknown env vars
+        extra = "ignore"
+        # Deprecated: use ConfigDict in Pydantic V3
 
     # ============================================
     # Validation helpers
