@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_DIRECT_URL: Optional[str] = None  # PostgreSQL direct connection
     
     # ============================================
     # Upstash Redis (Queue + Cache)

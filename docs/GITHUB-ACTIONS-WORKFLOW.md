@@ -59,6 +59,7 @@ Go to **Settings → Secrets and variables → Actions → Repository secrets** 
 | `STRIPE_WEBHOOK_SECRET` | `whsec_...` | Set after webhook configured |
 | `STRIPE_PUBLISHABLE_KEY` | `pk_test_51TWneCPWFs4pr...` | env.var |
 | `FLY_API_TOKEN` | `FlyV1_fm2_lJPECAAAAA...` | env.var (FLY_ORG_TOKEN) |
+| `ANTHROPIC_API_KEY` | `sk-ant-api03-pXcWHS5f...` | env.var (Claude LLM) |
 | `GITHUB_TOKEN` | `ghp_Nd41EnP9VYJgX454...` | env.var |
 | `APP_SECRET` | Any strong random string | Generate new |
 

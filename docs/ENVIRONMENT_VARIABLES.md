@@ -6,9 +6,9 @@ SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 ## Cloudflare R2 (Video Storage)
-CLOUDFLARE_ACCOUNT_ID=2bb32a965806f844959920297e233167
-CLOUDFLARE_R2_ACCESS_KEY_ID=2b259349da0083baaee5670ce98df86d
-CLOUDFLARE_R2_SECRET_ACCESS_KEY=344994e22626d029b4207e2ccaf072002cdf3511d40eb6d768c47a4bde728a97
+CLOUDFLARE_ACCOUNT_ID=your-account-id
+CLOUDFLARE_R2_ACCESS_KEY_ID=your-access-key
+CLOUDFLARE_R2_SECRET_ACCESS_KEY=your-secret-key
 CLOUDFLARE_R2_BUCKET_NAME=mostvaluableclipper
 
 ## Redis (Upstash)
@@ -38,7 +38,7 @@ ZERNIO_API_KEY=
 ## AI / LLM
 # Anthropic Claude (Hook Generation + Creative AI)
 # Get your key at: https://console.anthropic.com/
-ANTHROPIC_API_KEY=your-anthropic-api-key-here
+ANTHROPIC_API_KEY=sk-ant-api03-...
 
 ## Music Library
 # TikTok Commercial Music (requires TikTok for Business account)
