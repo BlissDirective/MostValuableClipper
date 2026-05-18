@@ -471,8 +471,6 @@ async def remix_clip(
     Processing is async via queue. Returns immediately with job_id for polling.
     """
     try:
-        from app.services.remix_service import remix_service
-        
         # Verify ownership
         clip = await db.get_clip(clip_id)
         if not clip:
@@ -617,3 +615,245 @@ async def get_thumbnails(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate thumbnails: {str(e)}")
+
+
+# ─────────────────────────────────────────────────────────────
+# A/B Testing Endpoints
+# ─────────────────────────────────────────────────────────────
+
+@router.post("/{clip_id}/ab-test")
+async def create_ab_test(
+    clip_id: str,
+    variant_ids: List[str],
+    user=Depends(get_current_user),
+    platform: str = "tiktok",
+    confidence_level: float = 0.95
+):
+    """Create an A/B test comparing original vs remix variants."""
+    try:
+        db = SupabaseService()
+        
+        # Verify original clip exists and belongs to user
+        original = await db.get_clip(clip_id)
+        if not original:
+            raise HTTPException(status_code=404, detail="Original clip not found")
+        if original.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        # Verify all variants exist and belong to user
+        for vid in variant_ids:
+            variant = await db.get_clip(vid)
+            if not variant:
+                raise HTTPException(status_code=404, detail=f"Variant {vid} not found")
+            if variant.get("user_id") != user.id:
+                raise HTTPException(status_code=403, detail=f"Not authorized for variant {vid}")
+        
+        test = await ab_testing_service.create_test(
+            original_clip_id=clip_id,
+            user_id=user.id,
+            variant_clip_ids=variant_ids,
+            pipeline_id=original.get("pipeline_id"),
+            platform=platform,
+            confidence_level=confidence_level
+        )
+        
+        return {
+            "success": True,
+            "test_id": test.test_id,
+            "status": test.status.value,
+            "variant_count": len(test.variants),
+            "message": "A/B test created. Post variants to start collecting data."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create A/B test: {str(e)}")
+
+
+@router.get("/{clip_id}/ab-test-status")
+async def get_ab_test_status(
+    clip_id: str,
+    user=Depends(get_current_user)
+):
+    """Get A/B test status for a clip."""
+    try:
+        # Find test by original_clip_id
+        tests = await ab_testing_service.list_user_tests(user.id, limit=50)
+        
+        test = next(
+            (t for t in tests if t["original_clip_id"] == clip_id),
+            None
+        )
+        
+        if not test:
+            raise HTTPException(status_code=404, detail="No A/B test found for this clip")
+        
+        return await ab_testing_service.get_test_status(test["test_id"])
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get test status: {str(e)}")
+
+
+@router.get("/ab-tests")
+async def list_ab_tests(
+    user=Depends(get_current_user),
+    status: Optional[str] = None,
+    limit: int = 20
+):
+    """List all A/B tests for the current user."""
+    try:
+        from app.services.ab_testing_service import TestStatus
+        
+        test_status = TestStatus(status) if status else None
+        
+        tests = await ab_testing_service.list_user_tests(
+            user_id=user.id,
+            status=test_status,
+            limit=limit
+        )
+        
+        return {
+            "tests": tests,
+            "total": len(tests)
+        }
+        
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list tests: {str(e)}")
+
+
+# ─────────────────────────────────────────────────────────────
+# Music Library Endpoints
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/music/tracks")
+async def list_music_tracks(
+    mood: Optional[str] = None,
+    user=Depends(get_current_user)
+):
+    """List available background music tracks."""
+    try:
+        tracks = music_library.list_tracks(mood=mood)
+        return {
+            "tracks": tracks,
+            "total": len(tracks),
+            "sources": {
+                "bundled": "Free royalty-free tracks from YouTube Audio Library + Pixabay",
+                "tiktok": "TikTok Commercial Music Library (requires TikTok for Business account)"
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list tracks: {str(e)}")
+
+
+@router.post("/{clip_id}/preview-music")
+async def preview_music_mix(
+    clip_id: str,
+    track_id: str,
+    user=Depends(get_current_user)
+):
+    """Generate a preview of a clip with background music mixed in."""
+    try:
+        db = SupabaseService()
+        
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        # Get track
+        track = music_library.get_track_info(track_id)
+        if not track:
+            raise HTTPException(status_code=404, detail="Track not found")
+        
+        if not track.get("available"):
+            raise HTTPException(status_code=400, detail="Track not available (missing file)")
+        
+        # For MVP: Return info about how to preview
+        # Full implementation would render a preview with FFmpeg
+        return {
+            "success": True,
+            "clip_id": clip_id,
+            "track": track,
+            "preview_url": None,  # Would be a presigned R2 URL after rendering
+            "message": "Music preview feature: download tracks to /app/music/ to enable mixing",
+            "setup_guide": {
+                "step_1": "Download free tracks from youtube.com/audiolibrary/music or pixabay.com/music",
+                "step_2": f"Place MP3 files in the app's music directory",
+                "step_3": "Update BUNDLED_TRACKS in music_library_service.py with track metadata",
+                "no_account_required": True,
+                "upgrade_options": [
+                    {"service": "TikTok Commercial Music Library", "cost": "Free", "account": "TikTok for Business"},
+                    {"service": "Epidemic Sound", "cost": "$15/month", "account": "Required"},
+                    {"service": "Artlist", "cost": "$30/month", "account": "Required"}
+                ]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to preview music: {str(e)}")
+
+
+# ─────────────────────────────────────────────────────────────
+# Claude LLM Hook Generation Endpoint (for testing/debug)
+# ─────────────────────────────────────────────────────────────
+
+@router.post("/generate-hooks")
+async def generate_hooks_llm(
+    transcript: str,
+    user=Depends(get_current_user),
+    num_variants: int = 3,
+    platform: str = "tiktok"
+):
+    """
+    Generate viral hooks using Claude LLM.
+    
+    This endpoint is useful for testing the LLM hook generation
+    without going through the full remix pipeline.
+    """
+    try:
+        # Get user's top archetypes
+        from app.services.hook_analysis_service import hook_analysis_service
+        
+        user_top_archetypes = []
+        try:
+            hook_analysis = await hook_analysis_service.analyze_hooks(user.id, days=30)
+            if hook_analysis.get("archetypes"):
+                user_top_archetypes = hook_analysis["archetypes"]
+        except Exception:
+            pass
+        
+        # Generate hooks
+        hooks = await claude_hook_service.generate_hooks(
+            transcript_text=transcript,
+            user_top_archetypes=user_top_archetypes,
+            num_variants=num_variants,
+            platform=platform
+        )
+        
+        return {
+            "success": True,
+            "hooks": [
+                {
+                    "hook_text": h.hook_text,
+                    "archetype": h.archetype,
+                    "confidence": h.confidence,
+                    "rationale": h.rationale,
+                    "estimated_retention": h.estimated_retention,
+                    "variant_index": h.variant_index
+                }
+                for h in hooks
+            ],
+            "user_top_archetypes": user_top_archetypes,
+            "model_used": "claude-sonnet-4-20250514" if claude_hook_service.api_key else "fallback"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Hook generation failed: {str(e)}")

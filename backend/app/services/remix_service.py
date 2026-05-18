@@ -20,6 +20,8 @@ from app.services.ffmpeg_service import FFmpegEditService
 from app.services.r2_service import R2Service
 from app.services.hook_analysis_service import hook_analysis_service
 from app.services.queue import QueueService
+from app.services.claude_hook_service import claude_hook_service, GeneratedHook
+
 
 logger = logging.getLogger(__name__)
 
@@ -352,92 +354,46 @@ class RemixService:
     # Phase 2: Hook & Caption Generation
     # ─────────────────────────────────────────────────────────────
 
-    def _generate_hook_variants(self, segment: SegmentScore,
-                                 user_id: str,
-                                 top_archetype: Optional[str] = None) -> List[Dict[str, str]]:
-        """Generate 2-3 hook text variants for a segment."""
-        # Determine best archetype to use
-        if not top_archetype:
-            # Use the segment's detected pattern
-            patterns = hook_analysis_service._classify_hook(segment.text)
-            if patterns:
-                top_archetype = patterns[0]["pattern_type"]
-            else:
-                top_archetype = "question"  # Default
-        
-        # Get user's top-performing archetype if we have data
-        user_top = None
+    async def _generate_hook_variants_llm(
+        self,
+        segment: SegmentScore,
+        user_id: str,
+        top_archetype: Optional[str] = None,
+        num_variants: int = 3
+    ) -> List[GeneratedHook]:
+        """Generate hooks using Anthropic Claude LLM."""
+        # Get user's top archetypes from analytics
+        user_top_archetypes = []
         try:
-            # This would ideally be cached; for now use default
-            user_top = "question"
+            hook_analysis = await hook_analysis_service.analyze_hooks(user_id, days=30)
+            if hook_analysis.get("archetypes"):
+                user_top_archetypes = hook_analysis["archetypes"]
         except Exception:
             pass
         
-        # Prefer user-top archetype if segment supports it
-        preferred_archetypes = [user_top] if user_top else []
-        if top_archetype not in preferred_archetypes:
-            preferred_archetypes.append(top_archetype)
-        preferred_archetypes.append("question")  # Fallback
+        # Generate hooks via Claude
+        hooks = await claude_hook_service.generate_hooks(
+            transcript_text=segment.text,
+            user_top_archetypes=user_top_archetypes,
+            num_variants=num_variants,
+            platform="tiktok"
+        )
         
-        # Extract topic from segment text
-        topic = segment.text[:30].strip()
-        if len(topic) > 40:
-            words = topic.split()[:5]
-            topic = " ".join(words)
-        
-        variants = []
-        used_archetypes = set()
-        
-        for archetype in preferred_archetypes:
-            if archetype in used_archetypes:
-                continue
-            used_archetypes.add(archetype)
-            
-            templates = self.HOOK_TEMPLATES.get(archetype, self.HOOK_TEMPLATES["question"])
-            
-            # Pick template based on energy
-            if segment.energy_score > 0.7:
-                template = templates[0]  # More provocative
-            elif segment.energy_score > 0.4:
-                template = templates[1]  # Balanced
-            else:
-                template = templates[2]  # Subtle
-            
-            hook_text = template.replace("{topic}", topic)
-            
-            variants.append({
-                "archetype": archetype,
-                "hook_text": hook_text,
-                "template": template
-            })
-            
-            if len(variants) >= 3:
-                break
-        
-        return variants
+        return hooks
 
-    def _generate_caption(self, hook: str, segment_text: str,
-                         style: str = "standard") -> Tuple[str, List[str]]:
-        """Generate caption and hashtags for remix."""
-        # Build caption from hook + condensed segment
-        body = segment_text[:120] if len(segment_text) > 120 else segment_text
-        
-        caption = f"{hook}\n\n{body}"
-        
-        # Generate hashtags from content
-        hashtag_candidates = []
-        words = (hook + " " + body).lower().split()
-        
-        # Extract key topics as hashtags
-        topic_words = [w for w in words if len(w) > 4 and w.isalpha()]
-        hashtag_candidates = list(set(topic_words))[:5]
-        
-        # Add trending/format hashtags
-        format_tags = ["#viral", "#trending", "#fyp", "#shorts", "#reels"]
-        
-        hashtags = [f"#{tag}" for tag in hashtag_candidates] + format_tags[:3]
-        
-        return caption, hashtags
+    async def _generate_caption_llm(
+        self,
+        hook: GeneratedHook,
+        segment_text: str,
+        platform: str = "tiktok"
+    ) -> Tuple[str, List[str]]:
+        """Generate caption and hashtags using Claude LLM."""
+        return await claude_hook_service.generate_caption_from_hook(
+            hook=hook,
+            transcript=segment_text,
+            platform=platform,
+            max_length=100
+        )
 
     def _select_music_mood(self, segment: SegmentScore) -> str:
         """Select background music mood based on segment characteristics."""
@@ -781,17 +737,20 @@ class RemixService:
             # 6. Generate variants
             variants = []
             for i, segment in enumerate(segments):
-                # Generate hooks
-                hook_variants = self._generate_hook_variants(
-                    segment, user_id, user_top_archetype
+                # Generate hooks via Claude LLM
+                generated_hooks = await self._generate_hook_variants_llm(
+                    segment, user_id, user_top_archetype, num_variants=1
                 )
                 
-                # Use the first hook variant
-                hook = hook_variants[0]
+                if not generated_hooks:
+                    logger.warning(f"[Remix] No hooks generated for variant {i+1}")
+                    continue
                 
-                # Generate caption
-                caption, hashtags = self._generate_caption(
-                    hook["hook_text"], segment.text
+                hook = generated_hooks[0]
+                
+                # Generate caption via Claude LLM
+                caption, hashtags = await self._generate_caption_llm(
+                    hook, segment.text
                 )
                 
                 # Select music mood
@@ -800,13 +759,13 @@ class RemixService:
                 # Create variant
                 variant = RemixVariant(
                     variant_id=f"{clip_id}_remix_{i+1}",
-                    hook_archetype=hook["archetype"],
-                    hook_text=hook["hook_text"],
+                    hook_archetype=hook.archetype,
+                    hook_text=hook.hook_text,
                     segment=segment,
                     music_mood=music_mood,
                     caption=caption,
                     hashtags=hashtags,
-                    estimated_retention=segment.composite_score
+                    estimated_retention=hook.estimated_retention
                 )
                 
                 # 7. Render the variant
