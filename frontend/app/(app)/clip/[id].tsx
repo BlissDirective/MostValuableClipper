@@ -14,6 +14,7 @@ import {
   Pencil,
   Repeat,
   Trash2,
+  Sparkles,
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -24,6 +25,7 @@ import { MetricChip } from "@/components/MetricChip";
 import { SafetyFlag, SafetyVariant } from "@/components/SafetyFlag";
 import { clipsApi, Clip } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
+import { triggerHaptic } from "@/utils/haptics";
 
 interface DetailData {
   id: string;
@@ -148,9 +150,44 @@ export default function ClipDetailScreen() {
       } else if (action === "edit") {
         // Navigate to edit screen
         router.push(`/(app)/clip/${clip.id}/edit`);
+      } else if (action === "remix") {
+        // AI-powered remix
+        Alert.alert(
+          "AI Remix",
+          "Generate 2-3 new versions with optimized hooks, fresh captions, and vertical format?",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Remix",
+              onPress: async () => {
+                try {
+                  triggerHaptic("heavy");
+                  const result = await clipsApi.remix(clip.id, {
+                    num_variants: 3,
+                    target_duration: 20,
+                    include_music: true,
+                    include_captions: true,
+                    output_format: "9:16",
+                  });
+                  if (result.success) {
+                    Alert.alert(
+                      "Remix Queued",
+                      "We're cooking up 3 AI-powered variants. Check your library in a few minutes."
+                    );
+                  } else {
+                    Alert.alert("Remix Failed", result.error || "Could not queue remix.");
+                  }
+                } catch (err: any) {
+                  console.warn("[clip-detail] remix failed:", err.message);
+                  Alert.alert("Remix Failed", err?.detail || "Something went wrong.");
+                }
+              }
+            }
+          ]
+        );
       } else {
-        // Post-MVP: edit and repost actions require AI generation pipeline
-        Alert.alert("Coming soon", `${action === "edit" ? "Clip editing" : "Reposting"} will be available in a future update.`);
+        // Post-MVP: repost actions require AI generation pipeline
+        Alert.alert("Coming soon", "Reposting will be available in a future update.");
       }
     },
     [clip.id, router]
@@ -252,8 +289,15 @@ export default function ClipDetailScreen() {
               onPress={() => handleAction("post")}
             />
             <ActionButton
-              label="Edit"
+              label="Remix"
               variant="secondary"
+              size="md"
+              iconLeft={Sparkles}
+              onPress={() => handleAction("remix")}
+            />
+            <ActionButton
+              label="Edit"
+              variant="ghost"
               size="md"
               iconLeft={Pencil}
               onPress={() => handleAction("edit")}

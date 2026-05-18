@@ -125,18 +125,62 @@ class EarningsSummary(BaseModel):
     total_clips_monetized: int = 0
     by_platform: Dict[str, float] = {}
 
+
+
 # ============================================
-# CLIP EDITING MODELS
+# CLIP REMIX MODELS
 # ============================================
-class ClipEditRequest(BaseModel):
-    """Edit recipe for clip modification via FFmpeg."""
-    trim: Optional[dict] = None  # {"start_seconds": 2.5, "end_seconds": 28.0}
-    segments: Optional[List[dict]] = None  # [{"start": 2.5, "end": 15.0}]
-    caption: Optional[str] = None
-    caption_style: Optional[dict] = None  # {"position": "bottom", "color": "white", "size": 24}
-    audio: Optional[str] = "keep"  # "keep", "mute", "replace:<url>"
-    speed: Optional[float] = 1.0  # 0.5 to 4.0
-    filters: Optional[List[str]] = None  # ["grayscale", "sepia", "vintage", "blur", "sharpen"]
-    text_overlays: Optional[List[dict]] = None
-    transitions: Optional[List[str]] = None  # ["fade", "dissolve"]
-    stickers: Optional[List[dict]] = None
+class RemixRequest(BaseModel):
+    """Request to AI-remix an existing clip."""
+    num_variants: Optional[int] = Field(3, ge=1, le=5, description="Number of remix variants to generate")
+    target_duration: Optional[int] = Field(20, ge=10, le=60, description="Target duration in seconds")
+    preferred_hook_archetype: Optional[str] = None  # "question", "promise", "pattern_break", etc.
+    include_music: Optional[bool] = True
+    include_captions: Optional[bool] = True
+    output_format: Optional[str] = "9:16"  # "9:16", "1:1", "16:9"
+
+class RemixVariantResponse(BaseModel):
+    """A single remix variant result."""
+    variant_id: str
+    clip_id: str
+    video_url: str
+    thumbnail_url: Optional[str] = None
+    caption: str
+    hashtags: List[str]
+    hook_archetype: str
+    hook_text: str
+    segment: Dict[str, Any]  # {"start": 0, "end": 25, "duration": 25, "score": 0.85}
+    duration: float
+    music_mood: str
+    estimated_retention: float
+
+class RemixResponse(BaseModel):
+    """Response from AI remix generation."""
+    success: bool
+    original_clip_id: str
+    variants: List[RemixVariantResponse]
+    total_variants: int
+    error: Optional[str] = None
+
+class RemixJob(BaseModel):
+    """Queued remix job status."""
+    job_id: str
+    clip_id: str
+    user_id: str
+    status: str  # "queued", "processing", "completed", "failed"
+    num_variants: int
+    result: Optional[RemixResponse] = None
+    error: Optional[str] = None
+    created_at: str
+    completed_at: Optional[str] = None
+
+class ClipRevision(BaseModel):
+    """Revision history entry for a clip (edit or remix)."""
+    id: str
+    clip_id: str
+    user_id: str
+    revision_type: str  # "edit", "remix", "manual"
+    previous_state: Dict[str, Any]
+    new_state: Dict[str, Any]
+    metadata: Optional[Dict[str, Any]] = {}
+    created_at: str

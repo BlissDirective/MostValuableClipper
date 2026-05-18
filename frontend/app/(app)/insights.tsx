@@ -303,6 +303,33 @@ export default function InsightsScreen() {
           )}
         </ScrollView>
 
+        {/* Remix analytics section */}
+        <SectionHeader 
+          title="AI Remix" 
+          subtitle="Smart reframe, hook optimization, and multi-variant generation."
+        />
+        <View style={styles.remixSection}>
+          <View style={styles.remixStatRow}>
+            <View style={styles.remixStat}>
+              <Text style={styles.remixStatValue}>3</Text>
+              <Text style={styles.remixStatLabel}>Variants per remix</Text>
+            </View>
+            <View style={styles.remixStat}>
+              <Text style={styles.remixStatValue}>9:16</Text>
+              <Text style={styles.remixStatLabel}>Auto vertical reframe</Text>
+            </View>
+            <View style={styles.remixStat}>
+              <Text style={styles.remixStatValue}>AI</Text>
+              <Text style={styles.remixStatLabel}>Hook-optimized captions</Text>
+            </View>
+          </View>
+          <Text style={styles.remixDescription}>
+            Remix uses scene detection, transcript salience scoring, and your top-performing hook archetypes 
+            to generate fresh vertical clips from existing content. Each variant gets a unique hook, 
+            caption, and auto-generated thumbnail.
+          </Text>
+        </View>
+
         {/* Best post times heatmap */}
         <SectionHeader title="Best post times" subtitle="Darker cells are lower velocity; lighter cells are higher." />
         <View style={styles.heatmap}>
@@ -812,5 +839,41 @@ const styles = StyleSheet.create({
     fontSize: tokens.type.scale.caption.size,
     color: tokens.color.text.tertiary,
     letterSpacing: tokens.type.scale.caption.letterSpacing,
+  },
+  remixSection: {
+    backgroundColor: tokens.color.bg.surface,
+    borderRadius: tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: tokens.color.border.subtle,
+    padding: tokens.spacing.md,
+    gap: tokens.spacing.md,
+  },
+  remixStatRow: {
+    flexDirection: "row",
+    gap: tokens.spacing.sm,
+  },
+  remixStat: {
+    flex: 1,
+    alignItems: "center",
+    gap: tokens.spacing.xs,
+  },
+  remixStatValue: {
+    fontFamily: tokens.type.scale.h2.family,
+    fontSize: tokens.type.scale.h2.size,
+    color: tokens.color.brand.indigo[500],
+    fontWeight: "700",
+  },
+  remixStatLabel: {
+    fontFamily: tokens.type.scale.caption.family,
+    fontSize: tokens.type.scale.caption.size,
+    color: tokens.color.text.tertiary,
+    textAlign: "center",
+    letterSpacing: tokens.type.scale.caption.letterSpacing,
+  },
+  remixDescription: {
+    fontFamily: tokens.type.scale.bodySmall.family,
+    fontSize: tokens.type.scale.bodySmall.size,
+    lineHeight: tokens.type.scale.bodySmall.lineHeight,
+    color: tokens.color.text.secondary,
   },
 });

@@ -81,11 +81,35 @@ export default function ApprovalScreen() {
   );
 
   const onEdit = useCallback(() => {
-    Alert.alert("Coming soon", "Clip editing will be available in a future update.");
-  }, [current]);
+    if (!current) return;
+    router.push(`/(app)/clip/${current.clip.id}/edit`);
+  }, [current, router]);
 
-  const onRemix = useCallback(() => {
-    Alert.alert("Coming soon", "Clip remixing will be available in a future update.");
+  const handleRemix = useCallback(async () => {
+    if (!current) return;
+    triggerHaptic("light");
+    try {
+      const result = await clipsApi.remix(current.clip.id, {
+        num_variants: 3,
+        target_duration: 20,
+        include_music: true,
+        include_captions: true,
+        output_format: "9:16",
+      });
+      
+      if (result.success) {
+        Alert.alert(
+          "Remix Queued",
+          `We're generating ${result.total_variants || 3} AI-powered remixes. Check your clip library in a few minutes.`,
+          [{ text: "OK", style: "default" }]
+        );
+      } else {
+        Alert.alert("Remix Failed", result.error || "Could not queue remix.");
+      }
+    } catch (err: any) {
+      console.warn("[approval] remix failed:", err.message);
+      Alert.alert("Remix Failed", err?.detail || "Something went wrong.");
+    }
   }, [current]);
 
   const topBanner = useMemo(() => current?.safetyFlags?.[0], [current]);
@@ -146,7 +170,8 @@ export default function ApprovalScreen() {
                     onApprove={() => advance("approve")}
                     onReject={() => advance("reject")}
                     onEdit={onEdit}
-                    onRemix={onRemix}
+                    onRemix={handleRemix}
+                    onLongPressRemix={handleRemix}
                   />
                 </View>
               ) : null}

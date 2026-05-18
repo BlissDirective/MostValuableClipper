@@ -4,7 +4,8 @@ from pydantic import BaseModel
 
 from app.models import (
     Clip, ClipCreate, ClipUpdate, ClipStatus,
-    Platform, PlatformPost, ClipEditRequest
+    Platform, PlatformPost, ClipEditRequest,
+    RemixRequest, RemixResponse, RemixJob
 )
 from app.services.auth import get_current_user
 from app.services.database import SupabaseService
@@ -453,6 +454,120 @@ async def get_edit_status(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get edit status: {str(e)}")
+
+
+@router.post("/{clip_id}/remix", response_model=RemixResponse)
+async def remix_clip(
+    clip_id: str,
+    request: RemixRequest,
+    user = Depends(get_current_user)
+):
+    """AI-powered remix of an existing clip.
+    
+    Extracts optimal segments using transcript analysis + audio energy scoring,
+    applies hook archetype optimization from the user's top-performing patterns,
+    generates 2-3 vertical 9:16 variants with new captions and thumbnails.
+    
+    Processing is async via queue. Returns immediately with job_id for polling.
+    """
+    try:
+        from app.services.remix_service import remix_service
+        
+        # Verify ownership
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        # Queue the remix job (async processing)
+        job_data = {
+            "job_type": "clip_remix",
+            "clip_id": clip_id,
+            "user_id": user.id,
+            "num_variants": request.num_variants,
+            "target_duration": request.target_duration,
+            "preferred_hook_archetype": request.preferred_hook_archetype,
+            "include_music": request.include_music,
+            "include_captions": request.include_captions,
+            "output_format": request.output_format,
+            "status": "queued",
+            "created_at": datetime.utcnow().isoformat()
+        }
+        
+        job_id = await queue.enqueue("clip_remix", job_data)
+        
+        # Update original clip to track remix
+        await db.update_clip(clip_id, {
+            "remix_job_id": job_id,
+            "remix_status": "queued"
+        })
+        
+        return {
+            "success": True,
+            "original_clip_id": clip_id,
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Remix job queued. Poll /clips/{id}/remix-status for progress.",
+            "variants": [],
+            "total_variants": 0
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Remix failed: {str(e)}")
+
+
+@router.get("/{clip_id}/remix-status")
+async def get_remix_status(
+    clip_id: str,
+    user = Depends(get_current_user)
+):
+    """Get the status of a clip remix job and any completed variants."""
+    try:
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        job_id = clip.get("remix_job_id")
+        if not job_id:
+            return {
+                "clip_id": clip_id,
+                "status": "no_remix",
+                "variants": []
+            }
+        
+        # Check queue status
+        job_status = await queue.get_job_status(job_id)
+        
+        # Fetch any completed remix variants
+        variants = await db.list_clips(
+            user_id=user.id,
+            status="rendered",
+            limit=10
+        )
+        # Filter to children of this clip
+        remix_variants = [
+            v for v in variants
+            if v.get("parent_clip_id") == clip_id
+        ]
+        
+        return {
+            "clip_id": clip_id,
+            "job_id": job_id,
+            "status": job_status or clip.get("remix_status", "unknown"),
+            "variants": remix_variants
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get remix status: {str(e)}")
 
 
 @router.post("/{clip_id}/thumbnails")

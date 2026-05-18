@@ -100,6 +100,24 @@ class SupabaseService:
         return result.data if result.data else None
     
     @staticmethod
+    async def get_clip_revisions(clip_id: str) -> List[Dict[str, Any]]:
+        """Get revision history for a clip."""
+        result = supabase.table("clip_revisions").select("*").eq("clip_id", clip_id).order("created_at", desc=True).execute()
+        return result.data if result.data else []
+    
+    @staticmethod
+    async def create_clip_revision(revision_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a revision history entry."""
+        result = supabase.table("clip_revisions").insert(revision_data).execute()
+        return result.data[0] if result.data else {}
+    
+    @staticmethod
+    async def get_remix_variants(parent_clip_id: str, user_id: str) -> List[Dict[str, Any]]:
+        """Get all remix variants of a parent clip."""
+        result = supabase.table("clips").select("*").eq("parent_clip_id", parent_clip_id).eq("user_id", user_id).order("created_at", desc=True).execute()
+        return result.data if result.data else []
+    
+    @staticmethod
     async def delete_clip(clip_id: str) -> bool:
         """Delete a clip."""
         result = supabase.table("clips").delete().eq("id", clip_id).execute()
