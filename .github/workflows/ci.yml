@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ master ]
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
 
 jobs:
   test:
@@ -48,7 +48,7 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     
     steps:
     - uses: actions/checkout@v4
@@ -59,26 +59,32 @@ jobs:
     - name: Set Fly.io secrets
       run: |
         cd backend
-        flyctl secrets set ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set SUPABASE_URL="${{ secrets.SUPABASE_URL }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set UPSTASH_REDIS_REST_URL="${{ secrets.UPSTASH_REDIS_REST_URL }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set UPSTASH_REDIS_REST_TOKEN="${{ secrets.UPSTASH_REDIS_REST_TOKEN }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set CLOUDFLARE_R2_ACCESS_KEY_ID="${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set CLOUDFLARE_R2_SECRET_ACCESS_KEY="${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set CLOUDFLARE_R2_API_TOKEN="${{ secrets.CLOUDFLARE_R2_API_TOKEN }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set CLOUDFLARE_ACCOUNT_ID="${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set CLOUDFLARE_R2_BUCKET="${{ secrets.CLOUDFLARE_R2_BUCKET || 'mvc-clips' }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set STRIPE_SECRET_KEY="${{ secrets.STRIPE_SECRET_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set STRIPE_PUBLISHABLE_KEY="${{ secrets.STRIPE_PUBLISHABLE_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set STRIPE_WEBHOOK_SECRET="${{ secrets.STRIPE_WEBHOOK_SECRET }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
-        flyctl secrets set APP_SECRET="${{ secrets.APP_SECRET }}" --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
+        flyctl secrets set ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set SUPABASE_URL="${{ secrets.SUPABASE_URL }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set SUPABASE_DIRECT_URL="${{ secrets.SUPABASE_DIRECT_URL }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set UPSTASH_REDIS_REST_URL="${{ secrets.UPSTASH_REDIS_REST_URL }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set UPSTASH_REDIS_REST_TOKEN="${{ secrets.UPSTASH_REDIS_REST_TOKEN }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set CLOUDFLARE_R2_ACCESS_KEY_ID="${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set CLOUDFLARE_R2_SECRET_ACCESS_KEY="${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set CLOUDFLARE_R2_API_TOKEN="${{ secrets.CLOUDFLARE_R2_API_TOKEN }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set CLOUDFLARE_ACCOUNT_ID="${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set CLOUDFLARE_R2_BUCKET="${{ secrets.CLOUDFLARE_R2_BUCKET || 'mvc-clips' }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set CLOUDFLARE_R2_ENDPOINT="${{ secrets.CLOUDFLARE_R2_ENDPOINT }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set STRIPE_SECRET_KEY="${{ secrets.STRIPE_SECRET_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set STRIPE_PUBLISHABLE_KEY="${{ secrets.STRIPE_PUBLISHABLE_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set STRIPE_WEBHOOK_SECRET="${{ secrets.STRIPE_WEBHOOK_SECRET }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set STRIPE_PRICE_BASIC="${{ secrets.STRIPE_PRICE_BASIC }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set STRIPE_PRICE_PRO="${{ secrets.STRIPE_PRICE_PRO }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set STRIPE_PRICE_ENTERPRISE="${{ secrets.STRIPE_PRICE_ENTERPRISE }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set APP_SECRET="${{ secrets.APP_SECRET }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
+        flyctl secrets set ZERNIO_API_KEY="${{ secrets.ZERNIO_API_KEY }}" --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
       env:
         FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     
     - name: Deploy to Fly.io
       run: |
         cd backend
-        flyctl deploy --remote-only --app "${{ secrets.FLY_APP_NAME || 'bliss-clip-api' }}"
+        flyctl deploy --remote-only --app "${{ secrets.FLY_APP_NAME || 'mvc-backend' }}"
       env:
         FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
