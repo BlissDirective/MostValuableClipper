@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,11 +11,12 @@ import {
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import {
   ChevronLeft,
+  Download,
   Film,
   Pencil,
   Repeat,
-  Trash2,
   Sparkles,
+  Trash2,
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -107,46 +109,36 @@ export default function ClipDetailScreen() {
           console.warn("[clip-detail] delete failed:", err.message);
         }
       } else if (action === "post") {
-        // Post clip to social platforms via Zernio
+        // Posting requires social API keys — BYOK now, premium auto-posting coming soon
         Alert.alert(
-          "Post Clip",
-          "Which platforms would you like to post to?",
+          "Auto-Posting",
+          "You can bring your own API keys for auto-posting to your social platforms. Integrated auto-posting with managed API keys will be a premium feature coming soon.",
           [
-            { text: "Cancel", style: "cancel" },
+            { text: "OK", style: "default" },
             {
-              text: "All Platforms",
-              onPress: async () => {
-                try {
-                  const result = await clipsApi.post(clip.id, ["tiktok", "instagram", "youtube"]);
-                  if (result.data.success) {
-                    Alert.alert(
-                      "Posted!",
-                      `Clip posted to ${Object.keys(result.data.platforms).length} platforms via Zernio.`
-                    );
-                  } else {
-                    Alert.alert("Post Failed", "Could not post clip. Please try again.");
-                  }
-                } catch (err: any) {
-                  console.warn("[clip-detail] post failed:", err.message);
-                  Alert.alert("Post Failed", err.message || "Unknown error");
-                }
-              }
+              text: "Download Clip",
+              onPress: () => handleAction("download"),
             },
-            {
-              text: "TikTok Only",
-              onPress: async () => {
-                try {
-                  const result = await clipsApi.post(clip.id, ["tiktok"]);
-                  if (result.data.success) {
-                    Alert.alert("Posted!", "Clip posted to TikTok via Zernio.");
-                  }
-                } catch (err: any) {
-                  Alert.alert("Post Failed", err.message || "Unknown error");
-                }
-              }
-            }
           ]
         );
+      } else if (action === "download") {
+        try {
+          triggerHaptic("heavy");
+          const result = await clipsApi.downloadUrl(clip.id);
+          if (result?.url) {
+            const supported = await Linking.canOpenURL(result.url);
+            if (supported) {
+              await Linking.openURL(result.url);
+            } else {
+              Alert.alert("Download Ready", result.url);
+            }
+          } else {
+            Alert.alert("Download Unavailable", "No download URL found for this clip.");
+          }
+        } catch (err: any) {
+          console.warn("[clip-detail] download failed:", err.message);
+          Alert.alert("Download Failed", err?.detail || "Could not generate download link.");
+        }
       } else if (action === "edit") {
         // Navigate to edit screen
         router.push(`/(app)/clip/${clip.id}/edit`);
@@ -276,6 +268,19 @@ export default function ClipDetailScreen() {
                 Source clipped under fair-use review. Original creator credited in caption per pipeline policy.
               </Text>
             </View>
+
+            {/* BYOK / Premium Banner */}
+            <View style={styles.byokBanner}>
+              <Text style={styles.byokTitle}>🔑 Bring Your Own API Keys</Text>
+              <Text style={styles.byokBody}>
+                You can bring your own API keys for auto posting capabilities. Connect your social media accounts using your own developer credentials for full control.
+              </Text>
+              <View style={styles.byokDivider} />
+              <Text style={styles.byokPremiumLabel}>PREMIUM COMING SOON</Text>
+              <Text style={styles.byokBody}>
+                Integrated API keys for auto posting will be a premium feature — managed keys, zero setup, one-tap posting across all platforms.
+              </Text>
+            </View>
           </View>
         </ScrollView>
 
@@ -287,6 +292,13 @@ export default function ClipDetailScreen() {
               size="md"
               iconLeft={Repeat}
               onPress={() => handleAction("post")}
+            />
+            <ActionButton
+              label="Download"
+              variant="secondary"
+              size="md"
+              iconLeft={Download}
+              onPress={() => handleAction("download")}
             />
             <ActionButton
               label="Remix"
@@ -440,5 +452,37 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: tokens.spacing.sm,
     padding: tokens.layout.screenPadding,
+  },
+  byokBanner: {
+    backgroundColor: tokens.color.brand.indigo[900],
+    borderRadius: tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: tokens.color.brand.indigo[700],
+    padding: tokens.spacing.md,
+    gap: tokens.spacing.sm,
+  },
+  byokTitle: {
+    fontFamily: tokens.type.scale.bodyMedium.family,
+    fontSize: tokens.type.scale.bodyMedium.size,
+    color: tokens.color.brand.indigo[200],
+    fontWeight: "700",
+  },
+  byokBody: {
+    fontFamily: tokens.type.scale.bodySmall.family,
+    fontSize: tokens.type.scale.bodySmall.size,
+    lineHeight: tokens.type.scale.bodySmall.lineHeight,
+    color: tokens.color.brand.indigo[100],
+  },
+  byokDivider: {
+    height: 1,
+    backgroundColor: tokens.color.brand.indigo[700],
+    marginVertical: tokens.spacing.xs,
+  },
+  byokPremiumLabel: {
+    fontFamily: tokens.type.scale.overline.family,
+    fontSize: tokens.type.scale.overline.size,
+    letterSpacing: tokens.type.scale.overline.letterSpacing,
+    color: tokens.color.brand.indigo[300],
+    fontWeight: "700",
   },
 });
