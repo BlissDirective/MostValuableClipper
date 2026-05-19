@@ -11,6 +11,7 @@ import {
   LucideIcon,
   Settings as SettingsIcon,
   UserRound,
+  Bot,
 } from "lucide-react-native";
 
 import { tokens } from "@/constants/tokens";
@@ -110,6 +111,11 @@ export default function ProfileScreen() {
             icon={SettingsIcon}
             label="Settings"
             onPress={() => router.push("/(app)/profile/settings")}
+          />
+          <LinkRow
+            icon={Bot}
+            label="Swarm Agents"
+            onPress={() => router.push("/(app)/profile/swarm")}
           />
           <LinkRow
             icon={CircleHelp}

@@ -110,6 +110,14 @@ export default function AppTabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="profile/swarm"
+        options={{
+          href: null,
+          headerShown: false,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+      <Tabs.Screen
         name="profile/settings"
         options={{
           href: null,

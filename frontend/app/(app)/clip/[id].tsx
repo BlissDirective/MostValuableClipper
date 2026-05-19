@@ -17,6 +17,9 @@ import {
   Repeat,
   Sparkles,
   Trash2,
+  Bot,
+  Zap,
+  Share2,
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -27,6 +30,7 @@ import { MetricChip } from "@/components/MetricChip";
 import { SafetyFlag, SafetyVariant } from "@/components/SafetyFlag";
 import { clipsApi, Clip } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
+import { useSwarmExecution } from "@/lib/api-hooks";
 import { triggerHaptic } from "@/utils/haptics";
 
 interface DetailData {
@@ -58,6 +62,7 @@ export default function ClipDetailScreen() {
   const [clipData, setClipData] = useState<Clip | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const doSignOut = useAuthStore((s) => s.doSignOut);
+  const { isRunning: swarmRunning, runHookSwarm, runRemixSwarm, runPostSwarm } = useSwarmExecution();
 
   useEffect(() => {
     if (!params.id) return;
@@ -177,6 +182,36 @@ export default function ClipDetailScreen() {
             }
           ]
         );
+      } else if (action === "swarm-hooks") {
+        try {
+          triggerHaptic("heavy");
+          const result = await runHookSwarm(clip.id, "tiktok");
+          Alert.alert(
+            "Swarm Hooks Queued",
+            `${result.agents} hook agents dispatched. Job ID: ${result.job_id.slice(0, 8)}...`
+          );
+        } catch (err: any) {
+          console.warn("[clip-detail] swarm hooks failed:", err.message);
+          Alert.alert("Swarm Failed", err?.detail || "Could not dispatch hook swarm.");
+        }
+      } else if (action === "swarm-remix") {
+        try {
+          triggerHaptic("heavy");
+          const result = await runRemixSwarm(clip.id);
+          Alert.alert(
+            "Swarm Remix Queued",
+            `${result.agents} remix agents dispatched. Job ID: ${result.job_id.slice(0, 8)}...`
+          );
+        } catch (err: any) {
+          console.warn("[clip-detail] swarm remix failed:", err.message);
+          Alert.alert("Swarm Failed", err?.detail || "Could not dispatch remix swarm.");
+        }
+      } else if (action === "swarm-post") {
+        // Swarm post requires connected accounts
+        Alert.alert(
+          "Swarm Post",
+          "Multi-account posting swarm will be available once social accounts are connected."
+        );
       } else {
         // Post-MVP: repost actions require AI generation pipeline
         Alert.alert("Coming soon", "Reposting will be available in a future update.");
@@ -292,6 +327,14 @@ export default function ClipDetailScreen() {
               size="md"
               iconLeft={Repeat}
               onPress={() => handleAction("post")}
+            />
+            <ActionButton
+              label="Swarm"
+              variant="primary"
+              size="md"
+              iconLeft={Bot}
+              onPress={() => handleAction("swarm-hooks")}
+              disabled={swarmRunning}
             />
             <ActionButton
               label="Download"
