@@ -116,7 +116,8 @@ async def login(data: LoginRequest):
     except Exception as e:
         # Supabase auth errors come as generic exceptions
         error_msg = str(e).lower()
-        if "invalid login" in error_msg or "invalid credentials" in error_msg or "user not found" in error_msg or "auth" in error_msg:
+        if "invalid login" in error_msg or "invalid credentials" in error_msg or \
+                "user not found" in error_msg or "auth" in error_msg:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"

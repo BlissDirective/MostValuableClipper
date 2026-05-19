@@ -1,9 +1,7 @@
-from fastapi import APIRouter, Request, HTTPException, status
+from fastapi import APIRouter, Request, HTTPException
 from typing import Dict, Any
 import logging
-import json
 
-from app.core.config import settings
 from app.services.stripe_service import StripeService
 from app.services.database import SupabaseService
 

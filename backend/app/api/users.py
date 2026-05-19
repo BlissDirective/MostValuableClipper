@@ -40,9 +40,12 @@ async def get_current_user_profile(user = Depends(get_current_user)):
             "email": user.email,
             "full_name": user.user_metadata.get("full_name") if user.user_metadata else None,
             "avatar_url": user.user_metadata.get("avatar_url") if user.user_metadata else None,
-            "subscription_tier": user.user_metadata.get("subscription_tier", "free") if user.user_metadata else "free",
-            "autonomy_mode": user.user_metadata.get("autonomy_mode", "approveEach") if user.user_metadata else "approveEach",
-            "onboarding_completed": user.user_metadata.get("onboarding_completed", False) if user.user_metadata else False,
+            "subscription_tier": user.user_metadata.get("subscription_tier", "free")
+            if user.user_metadata else "free",
+            "autonomy_mode": user.user_metadata.get("autonomy_mode", "approveEach")
+            if user.user_metadata else "approveEach",
+            "onboarding_completed": user.user_metadata.get("onboarding_completed", False)
+            if user.user_metadata else False,
             "created_at": user.created_at if hasattr(user, 'created_at') else None
         }
     except Exception as e:

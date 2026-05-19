@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -8,7 +8,10 @@ import logging
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.events import startup_event, shutdown_event
-from app.api import health, users, clips, pipelines, sources, earnings, webhooks, social, analytics, legal, auth, subscriptions
+from app.api import (
+    health, users, clips, pipelines, sources, earnings,
+    webhooks, social, analytics, legal, auth, subscriptions
+)
 
 # Setup logging
 setup_logging()

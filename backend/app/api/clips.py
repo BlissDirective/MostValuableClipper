@@ -4,8 +4,8 @@ from pydantic import BaseModel
 
 from app.models import (
     Clip, ClipCreate, ClipUpdate, ClipStatus,
-    Platform, PlatformPost, ClipEditRequest,
-    RemixRequest, RemixResponse, RemixJob
+    Platform, ClipEditRequest,
+    RemixRequest, RemixResponse
 )
 from app.services.auth import get_current_user
 from app.services.database import SupabaseService

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from datetime import datetime, timedelta
 
-from app.models import Earnings, EarningsSummary
+from app.models import EarningsSummary
 from app.services.auth import get_current_user
 from app.services.stripe_service import StripeService
 from app.services.database import SupabaseService

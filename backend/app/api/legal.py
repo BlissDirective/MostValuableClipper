@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Response
+from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
+
+# flake8: noqa: E501
 
 router = APIRouter()
 
