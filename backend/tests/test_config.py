@@ -28,15 +28,23 @@ class TestConfig:
     def test_supabase_url_format(self):
         """Test Supabase URL has correct format."""
         settings = Settings()
-        # If set, should end with .supabase.co
+        # If set, should end with .supabase.co (production) or be localhost (test)
         if settings.SUPABASE_URL:
-            assert settings.SUPABASE_URL.endswith('.supabase.co')
+            assert (
+                settings.SUPABASE_URL.endswith('.supabase.co')
+                or 'localhost' in settings.SUPABASE_URL
+                or '127.0.0.1' in settings.SUPABASE_URL
+            )
 
     def test_r2_endpoint_format(self):
         """Test R2 endpoint has correct format."""
         settings = Settings()
         if settings.CLOUDFLARE_R2_ENDPOINT:
-            assert 'cloudflarestorage.com' in settings.CLOUDFLARE_R2_ENDPOINT
+            assert (
+                'cloudflarestorage.com' in settings.CLOUDFLARE_R2_ENDPOINT
+                or 'localhost' in settings.CLOUDFLARE_R2_ENDPOINT
+                or '127.0.0.1' in settings.CLOUDFLARE_R2_ENDPOINT
+            )
 
     def test_app_secret_set(self):
         """Test app secret is not the default in production."""
