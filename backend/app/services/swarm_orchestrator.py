@@ -20,7 +20,12 @@ from app.models import (
     SwarmAgentResult, SwarmTier
 )
 from app.services.swarm_config_service import SwarmConfigService, SwarmJobService
-from app.services.swarm_agents import HookSwarmAgent, RemixSwarmAgent, PostSwarmAgent, AgentResult
+from app.services.swarm_agents import (
+    HookSwarmAgent, RemixSwarmAgent, PostSwarmAgent,
+    ABTestSwarmAgent, MusicMatchSwarmAgent, ThumbnailSwarmAgent,
+    SafetySwarmAgent, HooksAnalysisSwarmAgent, SegmentAnalyzeSwarmAgent,
+    EditSwarmAgent, AgentResult
+)
 from app.services.queue import QueueService
 from app.services.database import SupabaseService
 
@@ -365,7 +370,612 @@ class SwarmOrchestrator:
         }
 
     # ─────────────────────────────────────────────────────────────
-    # Internal: parallel agent execution
+    # AB Test Swarm
+    # ─────────────────────────────────────────────────────────────
+
+    async def execute_ab_test_swarm(
+        self,
+        test_id: str,
+        user_id: str,
+        clip_id: str,
+        agent_count: Optional[int] = None,
+        strategy_filter: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Run A/B test analysis in parallel with different strategies."""
+        config = await self.config_service.get_config(user_id)
+        allocated = config.get_pool_agents("ab_test")
+        requested = agent_count if agent_count is not None else allocated
+        max_agents = min(requested, allocated)
+
+        if max_agents <= 0:
+            return {"error": "A/B test swarm disabled or limit reached", "job_id": None}
+
+        if not await self.config_service.check_budget(user_id, "ab_test", max_agents):
+            return {"error": "Daily budget exceeded", "job_id": None}
+
+        if "ab_test" not in config.enabled_pools:
+            return {"error": "A/B test swarm pool disabled", "job_id": None}
+
+        job_id = str(uuid.uuid4())
+        job = SwarmJob(
+            job_id=job_id,
+            user_id=user_id,
+            job_type=SwarmJobType.ab_test,
+            status=SwarmJobStatus.running,
+            total_agents=max_agents,
+        )
+        await self.job_service.create_job(job)
+        await self.queue.enqueue("swarm_jobs", job.model_dump(mode="json"))
+
+        available_strategies = ABTestSwarmAgent.STRATEGIES
+        if strategy_filter:
+            strategies = [s for s in strategy_filter if s in available_strategies]
+            if not strategies:
+                strategies = available_strategies[:max_agents]
+        else:
+            strategies = available_strategies[:max_agents]
+        strategies = strategies[:max_agents]
+
+        agents = [
+            ABTestSwarmAgent(agent_index=i, strategy=strategies[i])
+            for i in range(len(strategies))
+        ]
+
+        start_time = time.time()
+        results = await self._run_agents(agents, job_id, clip_id, "", user_id)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        completed = [r for r in results if r.status == "completed"]
+        best_result = None
+        if completed:
+            # Pick winner with highest margin
+            best_result = max(completed, key=lambda r: r.data.get("margin_vs_second", 0))
+
+        total_cost = sum(r.cost_cents for r in results)
+
+        job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
+        job.completed_agents = len(completed)
+        job.failed_agents = len(results) - len(completed)
+        job.cost_cents = total_cost
+        job.completed_at = datetime.utcnow()
+        job.results_summary = {
+            "test_id": test_id,
+            "strategies_used": strategies,
+            "best_strategy": best_result.persona if best_result else None,
+            "total_agents": len(agents),
+            "completed": len(completed),
+            "failed": len(results) - len(completed),
+        }
+        await self.job_service.update_job(job)
+        await self.queue.mark_job_complete(job_id, job.model_dump(mode="json"))
+
+        return {
+            "job_id": job_id,
+            "agents": len(agents),
+            "results": [self._serialize_result(r) for r in results],
+            "best_result": self._serialize_result(best_result) if best_result else None,
+            "total_cost_cents": total_cost,
+            "duration_ms": duration_ms,
+        }
+
+    # ─────────────────────────────────────────────────────────────
+    # Music Match Swarm
+    # ─────────────────────────────────────────────────────────────
+
+    async def execute_music_match_swarm(
+        self,
+        clip_id: str,
+        user_id: str,
+        agent_count: Optional[int] = None,
+        strategy_filter: Optional[List[str]] = None,
+        segment_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Match music tracks in parallel with different strategies."""
+        config = await self.config_service.get_config(user_id)
+        allocated = config.get_pool_agents("music_match")
+        requested = agent_count if agent_count is not None else allocated
+        max_agents = min(requested, allocated)
+
+        if max_agents <= 0:
+            return {"error": "Music match swarm disabled or limit reached", "job_id": None}
+
+        if not await self.config_service.check_budget(user_id, "music_match", max_agents):
+            return {"error": "Daily budget exceeded", "job_id": None}
+
+        if "music_match" not in config.enabled_pools:
+            return {"error": "Music match swarm pool disabled", "job_id": None}
+
+        job_id = str(uuid.uuid4())
+        job = SwarmJob(
+            job_id=job_id,
+            user_id=user_id,
+            job_type=SwarmJobType.music_match,
+            status=SwarmJobStatus.running,
+            total_agents=max_agents,
+        )
+        await self.job_service.create_job(job)
+        await self.queue.enqueue("swarm_jobs", job.model_dump(mode="json"))
+
+        available_strategies = MusicMatchSwarmAgent.STRATEGIES
+        if strategy_filter:
+            strategies = [s for s in strategy_filter if s in available_strategies]
+            if not strategies:
+                strategies = available_strategies[:max_agents]
+        else:
+            strategies = available_strategies[:max_agents]
+        strategies = strategies[:max_agents]
+
+        agents = [
+            MusicMatchSwarmAgent(agent_index=i, strategy=strategies[i])
+            for i in range(len(strategies))
+        ]
+
+        start_time = time.time()
+        # Custom runner for music agents with segment_data
+        results = await self._run_music_agents(agents, job_id, clip_id, user_id, segment_data)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        completed = [r for r in results if r.status == "completed"]
+        best_result = None
+        if completed:
+            best_result = max(completed, key=lambda r: r.data.get("score", 0))
+
+        total_cost = sum(r.cost_cents for r in results)
+
+        job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
+        job.completed_agents = len(completed)
+        job.failed_agents = len(results) - len(completed)
+        job.cost_cents = total_cost
+        job.completed_at = datetime.utcnow()
+        job.results_summary = {
+            "clip_id": clip_id,
+            "strategies_used": strategies,
+            "best_strategy": best_result.persona if best_result else None,
+            "total_agents": len(agents),
+            "completed": len(completed),
+            "failed": len(results) - len(completed),
+        }
+        await self.job_service.update_job(job)
+        await self.queue.mark_job_complete(job_id, job.model_dump(mode="json"))
+
+        return {
+            "job_id": job_id,
+            "agents": len(agents),
+            "results": [self._serialize_result(r) for r in results],
+            "best_result": self._serialize_result(best_result) if best_result else None,
+            "total_cost_cents": total_cost,
+            "duration_ms": duration_ms,
+        }
+
+    # ─────────────────────────────────────────────────────────────
+    # Thumbnail Swarm
+    # ─────────────────────────────────────────────────────────────
+
+    async def execute_thumbnail_swarm(
+        self,
+        clip_id: str,
+        user_id: str,
+        agent_count: Optional[int] = None,
+        style_filter: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Generate thumbnails in parallel with different styles."""
+        config = await self.config_service.get_config(user_id)
+        allocated = config.get_pool_agents("thumbnail")
+        requested = agent_count if agent_count is not None else allocated
+        max_agents = min(requested, allocated)
+
+        if max_agents <= 0:
+            return {"error": "Thumbnail swarm disabled or limit reached", "job_id": None}
+
+        if not await self.config_service.check_budget(user_id, "thumbnail", max_agents):
+            return {"error": "Daily budget exceeded", "job_id": None}
+
+        if "thumbnail" not in config.enabled_pools:
+            return {"error": "Thumbnail swarm pool disabled", "job_id": None}
+
+        job_id = str(uuid.uuid4())
+        job = SwarmJob(
+            job_id=job_id,
+            user_id=user_id,
+            job_type=SwarmJobType.thumbnail,
+            status=SwarmJobStatus.running,
+            total_agents=max_agents,
+        )
+        await self.job_service.create_job(job)
+        await self.queue.enqueue("swarm_jobs", job.model_dump(mode="json"))
+
+        available_styles = ThumbnailSwarmAgent.STYLES
+        if style_filter:
+            styles = [s for s in style_filter if s in available_styles]
+            if not styles:
+                styles = available_styles[:max_agents]
+        else:
+            styles = available_styles[:max_agents]
+        styles = styles[:max_agents]
+
+        agents = [
+            ThumbnailSwarmAgent(agent_index=i, style=styles[i])
+            for i in range(len(styles))
+        ]
+
+        start_time = time.time()
+        results = await self._run_agents(agents, job_id, clip_id, "", user_id)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        completed = [r for r in results if r.status == "completed"]
+
+        total_cost = sum(r.cost_cents for r in results)
+
+        job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
+        job.completed_agents = len(completed)
+        job.failed_agents = len(results) - len(completed)
+        job.cost_cents = total_cost
+        job.completed_at = datetime.utcnow()
+        job.results_summary = {
+            "clip_id": clip_id,
+            "styles_used": styles,
+            "thumbnails_generated": len(completed),
+            "total_agents": len(agents),
+            "completed": len(completed),
+            "failed": len(results) - len(completed),
+        }
+        await self.job_service.update_job(job)
+        await self.queue.mark_job_complete(job_id, job.model_dump(mode="json"))
+
+        return {
+            "job_id": job_id,
+            "agents": len(agents),
+            "results": [self._serialize_result(r) for r in results],
+            "total_cost_cents": total_cost,
+            "duration_ms": duration_ms,
+        }
+
+    # ─────────────────────────────────────────────────────────────
+    # Safety Swarm
+    # ─────────────────────────────────────────────────────────────
+
+    async def execute_safety_swarm(
+        self,
+        clip_id: str,
+        user_id: str,
+        agent_count: Optional[int] = None,
+        sensitivity_filter: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Run safety checks in parallel with different sensitivity levels."""
+        config = await self.config_service.get_config(user_id)
+        allocated = config.get_pool_agents("safety")
+        requested = agent_count if agent_count is not None else allocated
+        max_agents = min(requested, allocated)
+
+        if max_agents <= 0:
+            return {"error": "Safety swarm disabled or limit reached", "job_id": None}
+
+        if not await self.config_service.check_budget(user_id, "safety", max_agents):
+            return {"error": "Daily budget exceeded", "job_id": None}
+
+        if "safety" not in config.enabled_pools:
+            return {"error": "Safety swarm pool disabled", "job_id": None}
+
+        job_id = str(uuid.uuid4())
+        job = SwarmJob(
+            job_id=job_id,
+            user_id=user_id,
+            job_type=SwarmJobType.safety,
+            status=SwarmJobStatus.running,
+            total_agents=max_agents,
+        )
+        await self.job_service.create_job(job)
+        await self.queue.enqueue("swarm_jobs", job.model_dump(mode="json"))
+
+        available_levels = SafetySwarmAgent.SENSITIVITY_LEVELS
+        if sensitivity_filter:
+            levels = [s for s in sensitivity_filter if s in available_levels]
+            if not levels:
+                levels = available_levels[:max_agents]
+        else:
+            levels = available_levels[:max_agents]
+        levels = levels[:max_agents]
+
+        agents = [
+            SafetySwarmAgent(agent_index=i, sensitivity=levels[i])
+            for i in range(len(levels))
+        ]
+
+        start_time = time.time()
+        results = await self._run_agents(agents, job_id, clip_id, "", user_id)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        completed = [r for r in results if r.status == "completed"]
+        # Consensus: most restrictive wins
+        all_safe = all(r.data.get("safe_to_post", False) for r in completed) if completed else False
+        needs_review = any(r.data.get("requires_review", False) for r in completed) if completed else False
+
+        total_cost = sum(r.cost_cents for r in results)
+
+        job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
+        job.completed_agents = len(completed)
+        job.failed_agents = len(results) - len(completed)
+        job.cost_cents = total_cost
+        job.completed_at = datetime.utcnow()
+        job.results_summary = {
+            "clip_id": clip_id,
+            "levels_used": levels,
+            "consensus_safe": all_safe,
+            "needs_review": needs_review,
+            "total_agents": len(agents),
+            "completed": len(completed),
+            "failed": len(results) - len(completed),
+        }
+        await self.job_service.update_job(job)
+        await self.queue.mark_job_complete(job_id, job.model_dump(mode="json"))
+
+        return {
+            "job_id": job_id,
+            "agents": len(agents),
+            "results": [self._serialize_result(r) for r in results],
+            "consensus": {
+                "safe_to_post": all_safe,
+                "needs_review": needs_review,
+                "restrictive_level": next((r.persona for r in completed if r.data.get("requires_review")), "standard")
+            },
+            "total_cost_cents": total_cost,
+            "duration_ms": duration_ms,
+        }
+
+    # ─────────────────────────────────────────────────────────────
+    # Hooks Analysis Swarm
+    # ─────────────────────────────────────────────────────────────
+
+    async def execute_hooks_analysis_swarm(
+        self,
+        clip_id: str,
+        user_id: str,
+        platform: str = "tiktok",
+        agent_count: Optional[int] = None,
+        method_filter: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Analyze hooks in parallel with different methods/time periods."""
+        config = await self.config_service.get_config(user_id)
+        allocated = config.get_pool_agents("hooks_analysis")
+        requested = agent_count if agent_count is not None else allocated
+        max_agents = min(requested, allocated)
+
+        if max_agents <= 0:
+            return {"error": "Hooks analysis swarm disabled or limit reached", "job_id": None}
+
+        if not await self.config_service.check_budget(user_id, "hooks_analysis", max_agents):
+            return {"error": "Daily budget exceeded", "job_id": None}
+
+        if "hooks_analysis" not in config.enabled_pools:
+            return {"error": "Hooks analysis swarm pool disabled", "job_id": None}
+
+        job_id = str(uuid.uuid4())
+        job = SwarmJob(
+            job_id=job_id,
+            user_id=user_id,
+            job_type=SwarmJobType.hooks_analysis,
+            status=SwarmJobStatus.running,
+            total_agents=max_agents,
+        )
+        await self.job_service.create_job(job)
+        await self.queue.enqueue("swarm_jobs", job.model_dump(mode="json"))
+
+        available_methods = HooksAnalysisSwarmAgent.METHODS
+        if method_filter:
+            methods = [m for m in method_filter if m in available_methods]
+            if not methods:
+                methods = available_methods[:max_agents]
+        else:
+            methods = available_methods[:max_agents]
+        methods = methods[:max_agents]
+
+        agents = [
+            HooksAnalysisSwarmAgent(agent_index=i, method=methods[i])
+            for i in range(len(methods))
+        ]
+
+        start_time = time.time()
+        results = await self._run_agents(agents, job_id, clip_id, platform, user_id)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        completed = [r for r in results if r.status == "completed"]
+
+        total_cost = sum(r.cost_cents for r in results)
+
+        job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
+        job.completed_agents = len(completed)
+        job.failed_agents = len(results) - len(completed)
+        job.cost_cents = total_cost
+        job.completed_at = datetime.utcnow()
+        job.results_summary = {
+            "clip_id": clip_id,
+            "methods_used": methods,
+            "total_agents": len(agents),
+            "completed": len(completed),
+            "failed": len(results) - len(completed),
+        }
+        await self.job_service.update_job(job)
+        await self.queue.mark_job_complete(job_id, job.model_dump(mode="json"))
+
+        return {
+            "job_id": job_id,
+            "agents": len(agents),
+            "results": [self._serialize_result(r) for r in results],
+            "total_cost_cents": total_cost,
+            "duration_ms": duration_ms,
+        }
+
+    # ─────────────────────────────────────────────────────────────
+    # Segment Analysis Swarm
+    # ─────────────────────────────────────────────────────────────
+
+    async def execute_segment_analyze_swarm(
+        self,
+        clip_id: str,
+        user_id: str,
+        agent_count: Optional[int] = None,
+        strategy_filter: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Analyze video segments in parallel with different strategies."""
+        config = await self.config_service.get_config(user_id)
+        allocated = config.get_pool_agents("segment_analyze")
+        requested = agent_count if agent_count is not None else allocated
+        max_agents = min(requested, allocated)
+
+        if max_agents <= 0:
+            return {"error": "Segment analyze swarm disabled or limit reached", "job_id": None}
+
+        if not await self.config_service.check_budget(user_id, "segment_analyze", max_agents):
+            return {"error": "Daily budget exceeded", "job_id": None}
+
+        if "segment_analyze" not in config.enabled_pools:
+            return {"error": "Segment analyze swarm pool disabled", "job_id": None}
+
+        job_id = str(uuid.uuid4())
+        job = SwarmJob(
+            job_id=job_id,
+            user_id=user_id,
+            job_type=SwarmJobType.segment_analyze,
+            status=SwarmJobStatus.running,
+            total_agents=max_agents,
+        )
+        await self.job_service.create_job(job)
+        await self.queue.enqueue("swarm_jobs", job.model_dump(mode="json"))
+
+        available_strategies = SegmentAnalyzeSwarmAgent.STRATEGIES
+        if strategy_filter:
+            strategies = [s for s in strategy_filter if s in available_strategies]
+            if not strategies:
+                strategies = available_strategies[:max_agents]
+        else:
+            strategies = available_strategies[:max_agents]
+        strategies = strategies[:max_agents]
+
+        agents = [
+            SegmentAnalyzeSwarmAgent(agent_index=i, strategy=strategies[i])
+            for i in range(len(strategies))
+        ]
+
+        start_time = time.time()
+        results = await self._run_agents(agents, job_id, clip_id, "", user_id)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        completed = [r for r in results if r.status == "completed"]
+        best_result = None
+        if completed:
+            best_result = max(completed, key=lambda r: r.data.get("best_segment", {}).get("score", 0) if r.data.get("best_segment") else 0)
+
+        total_cost = sum(r.cost_cents for r in results)
+
+        job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
+        job.completed_agents = len(completed)
+        job.failed_agents = len(results) - len(completed)
+        job.cost_cents = total_cost
+        job.completed_at = datetime.utcnow()
+        job.results_summary = {
+            "clip_id": clip_id,
+            "strategies_used": strategies,
+            "best_strategy": best_result.persona if best_result else None,
+            "total_agents": len(agents),
+            "completed": len(completed),
+            "failed": len(results) - len(completed),
+        }
+        await self.job_service.update_job(job)
+        await self.queue.mark_job_complete(job_id, job.model_dump(mode="json"))
+
+        return {
+            "job_id": job_id,
+            "agents": len(agents),
+            "results": [self._serialize_result(r) for r in results],
+            "best_result": self._serialize_result(best_result) if best_result else None,
+            "total_cost_cents": total_cost,
+            "duration_ms": duration_ms,
+        }
+
+    # ─────────────────────────────────────────────────────────────
+    # Edit Swarm
+    # ─────────────────────────────────────────────────────────────
+
+    async def execute_edit_swarm(
+        self,
+        clip_id: str,
+        user_id: str,
+        agent_count: Optional[int] = None,
+        recipe_filter: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Apply video edits in parallel with different recipes."""
+        config = await self.config_service.get_config(user_id)
+        allocated = config.get_pool_agents("edit")
+        requested = agent_count if agent_count is not None else allocated
+        max_agents = min(requested, allocated)
+
+        if max_agents <= 0:
+            return {"error": "Edit swarm disabled or limit reached", "job_id": None}
+
+        if not await self.config_service.check_budget(user_id, "edit", max_agents):
+            return {"error": "Daily budget exceeded", "job_id": None}
+
+        if "edit" not in config.enabled_pools:
+            return {"error": "Edit swarm pool disabled", "job_id": None}
+
+        job_id = str(uuid.uuid4())
+        job = SwarmJob(
+            job_id=job_id,
+            user_id=user_id,
+            job_type=SwarmJobType.edit,
+            status=SwarmJobStatus.running,
+            total_agents=max_agents,
+        )
+        await self.job_service.create_job(job)
+        await self.queue.enqueue("swarm_jobs", job.model_dump(mode="json"))
+
+        available_recipes = EditSwarmAgent.RECIPES
+        if recipe_filter:
+            recipes = [r for r in recipe_filter if r in available_recipes]
+            if not recipes:
+                recipes = available_recipes[:max_agents]
+        else:
+            recipes = available_recipes[:max_agents]
+        recipes = recipes[:max_agents]
+
+        agents = [
+            EditSwarmAgent(agent_index=i, recipe=recipes[i])
+            for i in range(len(recipes))
+        ]
+
+        start_time = time.time()
+        results = await self._run_agents(agents, job_id, clip_id, "", user_id)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        completed = [r for r in results if r.status == "completed"]
+
+        total_cost = sum(r.cost_cents for r in results)
+
+        job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
+        job.completed_agents = len(completed)
+        job.failed_agents = len(results) - len(completed)
+        job.cost_cents = total_cost
+        job.completed_at = datetime.utcnow()
+        job.results_summary = {
+            "clip_id": clip_id,
+            "recipes_used": recipes,
+            "total_agents": len(agents),
+            "completed": len(completed),
+            "failed": len(results) - len(completed),
+        }
+        await self.job_service.update_job(job)
+        await self.queue.mark_job_complete(job_id, job.model_dump(mode="json"))
+
+        return {
+            "job_id": job_id,
+            "agents": len(agents),
+            "results": [self._serialize_result(r) for r in results],
+            "total_cost_cents": total_cost,
+            "duration_ms": duration_ms,
+        }
+
+    # ─────────────────────────────────────────────────────────────
+    # Internal: parallel agent execution (updated for all types)
     # ─────────────────────────────────────────────────────────────
 
     async def _run_agents(
@@ -382,6 +992,18 @@ class SwarmOrchestrator:
                 if isinstance(agent, HookSwarmAgent):
                     result = await agent.execute(clip_id, platform, user_id)
                 elif isinstance(agent, RemixSwarmAgent):
+                    result = await agent.execute(clip_id, user_id)
+                elif isinstance(agent, ABTestSwarmAgent):
+                    result = await agent.execute(clip_id, user_id, clip_id)
+                elif isinstance(agent, ThumbnailSwarmAgent):
+                    result = await agent.execute(clip_id, user_id)
+                elif isinstance(agent, SafetySwarmAgent):
+                    result = await agent.execute(clip_id, user_id)
+                elif isinstance(agent, HooksAnalysisSwarmAgent):
+                    result = await agent.execute(clip_id, user_id, platform)
+                elif isinstance(agent, SegmentAnalyzeSwarmAgent):
+                    result = await agent.execute(clip_id, user_id)
+                elif isinstance(agent, EditSwarmAgent):
                     result = await agent.execute(clip_id, user_id)
                 else:
                     result = AgentResult(
@@ -409,9 +1031,10 @@ class SwarmOrchestrator:
                 return result
             except Exception as e:
                 logger.error(f"[SwarmOrchestrator] Agent {agent.agent_index} crashed: {e}")
+                persona = getattr(agent, "persona", getattr(agent, "strategy", getattr(agent, "style", getattr(agent, "sensitivity", getattr(agent, "method", getattr(agent, "recipe", "unknown"))))))
                 result = AgentResult(
                     agent_index=agent.agent_index,
-                    persona=getattr(agent, "persona", getattr(agent, "strategy", "unknown")),
+                    persona=persona,
                     status="failed",
                     data={},
                     cost_cents=0,
@@ -489,6 +1112,58 @@ class SwarmOrchestrator:
             hook_data = hooks[i] if hooks and i < len(hooks) else None
             tasks.append(run_with_tracking(agent, hook_data))
 
+        return await asyncio.gather(*tasks)
+
+    async def _run_music_agents(
+        self,
+        agents: List[MusicMatchSwarmAgent],
+        job_id: str,
+        clip_id: str,
+        user_id: str,
+        segment_data: Optional[Dict[str, Any]] = None
+    ) -> List[AgentResult]:
+        """Execute music match agents in parallel with error isolation."""
+        async def run_with_tracking(agent):
+            try:
+                result = await agent.execute(clip_id, user_id, segment_data)
+
+                await self.job_service.save_agent_result(SwarmAgentResult(
+                    result_id=str(uuid.uuid4()),
+                    job_id=job_id,
+                    agent_index=result.agent_index,
+                    agent_persona=result.persona,
+                    status=result.status,
+                    result_data=result.data,
+                    cost_cents=result.cost_cents,
+                    duration_ms=result.duration_ms,
+                    error_message=result.error,
+                ))
+                return result
+            except Exception as e:
+                logger.error(f"[SwarmOrchestrator] Music agent {agent.agent_index} crashed: {e}")
+                result = AgentResult(
+                    agent_index=agent.agent_index,
+                    persona=agent.strategy,
+                    status="failed",
+                    data={},
+                    cost_cents=0,
+                    duration_ms=0,
+                    error=str(e)
+                )
+                await self.job_service.save_agent_result(SwarmAgentResult(
+                    result_id=str(uuid.uuid4()),
+                    job_id=job_id,
+                    agent_index=result.agent_index,
+                    agent_persona=result.persona,
+                    status="failed",
+                    result_data={},
+                    cost_cents=0,
+                    duration_ms=0,
+                    error_message=str(e),
+                ))
+                return result
+
+        tasks = [run_with_tracking(agent) for agent in agents]
         return await asyncio.gather(*tasks)
 
     # ─────────────────────────────────────────────────────────────

@@ -27,9 +27,16 @@ class SwarmConfigService:
 
     # Default costs per agent execution (cents)
     DEFAULT_COSTS = {
-        "hook": 5,      # ~$0.05 per Claude call
-        "remix": 20,    # ~$0.20 per variant (FFmpeg + storage)
-        "post": 1,      # ~$0.01 per API call
+        "hook": 5,           # ~$0.05 per Claude call
+        "remix": 20,         # ~$0.20 per variant (FFmpeg + storage)
+        "post": 1,           # ~$0.01 per API call
+        "ab_test": 3,        # ~$0.03 per variant comparison
+        "music_match": 2,    # ~$0.02 per track match
+        "thumbnail": 1,      # ~$0.01 per thumbnail generation
+        "safety": 1,         # ~$0.01 per safety check
+        "hooks_analysis": 8, # ~$0.08 per analysis batch
+        "segment_analyze": 5, # ~$0.05 per segment strategy
+        "edit": 15,          # ~$0.15 per edit recipe
     }
 
     @staticmethod
@@ -59,7 +66,10 @@ class SwarmConfigService:
             tier=tier,
             total_max_agents=total_agents,
             auto_balance=True,
-            enabled_pools=["hook", "remix", "post"],
+            enabled_pools=[
+                "hook", "remix", "post", "ab_test", "music_match",
+                "thumbnail", "safety", "hooks_analysis", "segment_analyze", "edit"
+            ],
             daily_budget_cents=0,
         )
         

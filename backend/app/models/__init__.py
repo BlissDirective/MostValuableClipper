@@ -203,7 +203,10 @@ class SwarmConfig(BaseModel):
     
     def auto_balance_allocation(self) -> None:
         """Automatically balance agent allocation across enabled pools."""
-        enabled = [p for p in self.enabled_pools if p in ["hook", "remix", "post"]]
+        enabled = [p for p in self.enabled_pools if p in [
+            "hook", "remix", "post", "ab_test", "music_match",
+            "thumbnail", "safety", "hooks_analysis", "segment_analyze", "edit"
+        ]]
         n_pools = len(enabled)
         
         if n_pools == 0:
@@ -223,6 +226,13 @@ class SwarmJobType(str, Enum):
     hook = "hook"
     remix = "remix"
     post = "post"
+    ab_test = "ab_test"
+    music_match = "music_match"
+    thumbnail = "thumbnail"
+    safety = "safety"
+    hooks_analysis = "hooks_analysis"
+    segment_analyze = "segment_analyze"
+    edit = "edit"
 
 class SwarmJobStatus(str, Enum):
     queued = "queued"

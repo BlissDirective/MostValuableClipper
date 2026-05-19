@@ -47,6 +47,44 @@ class SwarmPostRequest(BaseModel):
     # Optional override; if not provided, uses user's custom allocation
     agent_count: Optional[int] = Field(None, ge=1, le=50)
 
+class SwarmABTestRequest(BaseModel):
+    test_id: str
+    clip_id: str
+    agent_count: Optional[int] = Field(None, ge=1, le=50)
+    strategy_filter: Optional[List[str]] = None
+
+class SwarmMusicMatchRequest(BaseModel):
+    clip_id: str
+    agent_count: Optional[int] = Field(None, ge=1, le=50)
+    strategy_filter: Optional[List[str]] = None
+    segment_data: Optional[Dict[str, Any]] = None
+
+class SwarmThumbnailRequest(BaseModel):
+    clip_id: str
+    agent_count: Optional[int] = Field(None, ge=1, le=50)
+    style_filter: Optional[List[str]] = None
+
+class SwarmSafetyRequest(BaseModel):
+    clip_id: str
+    agent_count: Optional[int] = Field(None, ge=1, le=50)
+    sensitivity_filter: Optional[List[str]] = None
+
+class SwarmHooksAnalysisRequest(BaseModel):
+    clip_id: str
+    platform: str = "tiktok"
+    agent_count: Optional[int] = Field(None, ge=1, le=50)
+    method_filter: Optional[List[str]] = None
+
+class SwarmSegmentAnalyzeRequest(BaseModel):
+    clip_id: str
+    agent_count: Optional[int] = Field(None, ge=1, le=50)
+    strategy_filter: Optional[List[str]] = None
+
+class SwarmEditRequest(BaseModel):
+    clip_id: str
+    agent_count: Optional[int] = Field(None, ge=1, le=50)
+    recipe_filter: Optional[List[str]] = None
+
 class SwarmConfigUpdateRequest(BaseModel):
     enabled_pools: Optional[List[str]] = None
     daily_budget_cents: Optional[int] = Field(None, ge=0)
@@ -97,6 +135,59 @@ class SwarmPostResponse(BaseModel):
     agents: int
     posts: List[Dict[str, Any]]
     summary: Dict[str, Any]
+    total_cost_cents: int
+    duration_ms: int
+
+class SwarmABTestResponse(BaseModel):
+    job_id: str
+    agents: int
+    results: List[Dict[str, Any]]
+    best_result: Optional[Dict[str, Any]] = None
+    total_cost_cents: int
+    duration_ms: int
+
+class SwarmMusicMatchResponse(BaseModel):
+    job_id: str
+    agents: int
+    results: List[Dict[str, Any]]
+    best_result: Optional[Dict[str, Any]] = None
+    total_cost_cents: int
+    duration_ms: int
+
+class SwarmThumbnailResponse(BaseModel):
+    job_id: str
+    agents: int
+    results: List[Dict[str, Any]]
+    total_cost_cents: int
+    duration_ms: int
+
+class SwarmSafetyResponse(BaseModel):
+    job_id: str
+    agents: int
+    results: List[Dict[str, Any]]
+    consensus: Dict[str, Any]
+    total_cost_cents: int
+    duration_ms: int
+
+class SwarmHooksAnalysisResponse(BaseModel):
+    job_id: str
+    agents: int
+    results: List[Dict[str, Any]]
+    total_cost_cents: int
+    duration_ms: int
+
+class SwarmSegmentAnalyzeResponse(BaseModel):
+    job_id: str
+    agents: int
+    results: List[Dict[str, Any]]
+    best_result: Optional[Dict[str, Any]] = None
+    total_cost_cents: int
+    duration_ms: int
+
+class SwarmEditResponse(BaseModel):
+    job_id: str
+    agents: int
+    results: List[Dict[str, Any]]
     total_cost_cents: int
     duration_ms: int
 
@@ -301,6 +392,188 @@ async def post_clip_swarm(
         )
 
     return SwarmPostResponse(**result)
+
+
+# ─────────────────────────────────────────────────────────────
+# Expanded Swarm Execution Endpoints
+# ─────────────────────────────────────────────────────────────
+
+@router.post("/ab-test", response_model=SwarmABTestResponse)
+async def ab_test_swarm(
+    request: SwarmABTestRequest,
+    user=Depends(get_current_user)
+):
+    """Run A/B test analysis in parallel with different comparison strategies.
+    
+    Strategies: engagement_winner, retention_winner, composite_winner, views_winner, watch_time_winner
+    """
+    result = await swarm_orchestrator.execute_ab_test_swarm(
+        test_id=request.test_id,
+        user_id=user.id,
+        clip_id=request.clip_id,
+        agent_count=request.agent_count,
+        strategy_filter=request.strategy_filter
+    )
+
+    if "error" in result and not result.get("job_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"]
+        )
+
+    return SwarmABTestResponse(**result)
+
+
+@router.post("/music-match", response_model=SwarmMusicMatchResponse)
+async def music_match_swarm(
+    request: SwarmMusicMatchRequest,
+    user=Depends(get_current_user)
+):
+    """Match music tracks in parallel with different selection strategies.
+    
+    Strategies: energy_match, contrast_boost, tempo_sync, mood_amplify, neutral_underscore
+    """
+    result = await swarm_orchestrator.execute_music_match_swarm(
+        clip_id=request.clip_id,
+        user_id=user.id,
+        agent_count=request.agent_count,
+        strategy_filter=request.strategy_filter,
+        segment_data=request.segment_data
+    )
+
+    if "error" in result and not result.get("job_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"]
+        )
+
+    return SwarmMusicMatchResponse(**result)
+
+
+@router.post("/thumbnail", response_model=SwarmThumbnailResponse)
+async def thumbnail_swarm(
+    request: SwarmThumbnailRequest,
+    user=Depends(get_current_user)
+):
+    """Generate thumbnails in parallel with different style strategies.
+    
+    Styles: face_focus, text_overlay, action_peak, color_pop, mid_shot
+    """
+    result = await swarm_orchestrator.execute_thumbnail_swarm(
+        clip_id=request.clip_id,
+        user_id=user.id,
+        agent_count=request.agent_count,
+        style_filter=request.style_filter
+    )
+
+    if "error" in result and not result.get("job_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"]
+        )
+
+    return SwarmThumbnailResponse(**result)
+
+
+@router.post("/safety", response_model=SwarmSafetyResponse)
+async def safety_swarm(
+    request: SwarmSafetyRequest,
+    user=Depends(get_current_user)
+):
+    """Run safety checks in parallel with different sensitivity levels.
+    
+    Levels: strict, standard, permissive, brand_safe, kids_safe
+    """
+    result = await swarm_orchestrator.execute_safety_swarm(
+        clip_id=request.clip_id,
+        user_id=user.id,
+        agent_count=request.agent_count,
+        sensitivity_filter=request.sensitivity_filter
+    )
+
+    if "error" in result and not result.get("job_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"]
+        )
+
+    return SwarmSafetyResponse(**result)
+
+
+@router.post("/hooks-analysis", response_model=SwarmHooksAnalysisResponse)
+async def hooks_analysis_swarm(
+    request: SwarmHooksAnalysisRequest,
+    user=Depends(get_current_user)
+):
+    """Analyze hooks in parallel with different time periods and methods.
+    
+    Methods: recent_7d, recent_30d, all_time, per_platform, by_archetype
+    """
+    result = await swarm_orchestrator.execute_hooks_analysis_swarm(
+        clip_id=request.clip_id,
+        user_id=user.id,
+        platform=request.platform,
+        agent_count=request.agent_count,
+        method_filter=request.method_filter
+    )
+
+    if "error" in result and not result.get("job_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"]
+        )
+
+    return SwarmHooksAnalysisResponse(**result)
+
+
+@router.post("/segment-analyze", response_model=SwarmSegmentAnalyzeResponse)
+async def segment_analyze_swarm(
+    request: SwarmSegmentAnalyzeRequest,
+    user=Depends(get_current_user)
+):
+    """Analyze video segments in parallel with different strategies.
+    
+    Strategies: energy_peak, face_presence, hook_potential, question_moment, silence_break
+    """
+    result = await swarm_orchestrator.execute_segment_analyze_swarm(
+        clip_id=request.clip_id,
+        user_id=user.id,
+        agent_count=request.agent_count,
+        strategy_filter=request.strategy_filter
+    )
+
+    if "error" in result and not result.get("job_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"]
+        )
+
+    return SwarmSegmentAnalyzeResponse(**result)
+
+
+@router.post("/edit", response_model=SwarmEditResponse)
+async def edit_swarm(
+    request: SwarmEditRequest,
+    user=Depends(get_current_user)
+):
+    """Apply video edits in parallel with different recipe strategies.
+    
+    Recipes: fast_cuts, caption_heavy, zoom_pulse, clean_trim, reaction_focus
+    """
+    result = await swarm_orchestrator.execute_edit_swarm(
+        clip_id=request.clip_id,
+        user_id=user.id,
+        agent_count=request.agent_count,
+        recipe_filter=request.recipe_filter
+    )
+
+    if "error" in result and not result.get("job_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"]
+        )
+
+    return SwarmEditResponse(**result)
 
 
 # ─────────────────────────────────────────────────────────────
