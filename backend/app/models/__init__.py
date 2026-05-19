@@ -125,16 +125,99 @@ class SwarmTier(str, Enum):
     enterprise = "enterprise"
 
 class SwarmConfig(BaseModel):
-    """User's swarm configuration with tier-based limits."""
+    """User's swarm configuration with customizable agent allocation."""
     user_id: str
     tier: SwarmTier = SwarmTier.free
-    max_hook_agents: int = Field(1, ge=1, le=50)
-    max_remix_agents: int = Field(1, ge=1, le=50)
-    max_post_agents: int = Field(1, ge=1, le=50)
+    
+    # Custom agent allocation across swarm types
+    # Keys: "hook", "remix", "post"
+    # Values: number of agents allocated to each type
+    agent_allocation: Dict[str, int] = Field(
+        default_factory=lambda: {"hook": 1, "remix": 1, "post": 1},
+        description="Custom agent allocation per swarm type"
+    )
+    
+    # Auto-balance mode: when true, automatically distributes agents evenly
+    # When false, uses custom agent_allocation
+    auto_balance: bool = Field(default=True, description="Auto-distribute agents evenly")
+    
+    # Maximum total agents allowed (derived from tier, but can be overridden in enterprise)
+    total_max_agents: int = Field(1, ge=1, le=50, description="Total agent limit")
+    
+    # Which swarm pools are enabled for this user
     enabled_pools: List[str] = Field(default_factory=lambda: ["hook", "remix", "post"])
+    
+    # Daily budget for swarm operations (cents)
     daily_budget_cents: int = Field(0, ge=0, description="Daily budget in cents. 0 = unlimited")
+    
+    # Agent behavior preferences
+    agent_behavior: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "hook": {"personas": ["punchy", "aspirational", "controversial"]},
+            "remix": {"strategies": ["energy_max", "face_presence", "hook_quality"]},
+            "post": {"parallel_accounts": True, "stagger_posts": False}
+        },
+        description="Agent behavior configuration per pool type"
+    )
+    
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    @property
+    def allocated_total(self) -> int:
+        """Total agents currently allocated."""
+        return sum(self.agent_allocation.values())
+    
+    @property
+    def available_agents(self) -> int:
+        """Remaining agents available for allocation."""
+        return self.total_max_agents - self.allocated_total
+    
+    def get_pool_agents(self, pool_type: str) -> int:
+        """Get number of agents allocated to a specific pool."""
+        if pool_type not in self.enabled_pools:
+            return 0
+        return self.agent_allocation.get(pool_type, 0)
+    
+    def validate_allocation(self) -> tuple[bool, str]:
+        """Validate that current allocation is valid.
+        
+        Returns:
+            (is_valid, error_message)
+        """
+        total = self.allocated_total
+        
+        if total > self.total_max_agents:
+            return False, f"Total allocation ({total}) exceeds tier limit ({self.total_max_agents})"
+        
+        if total == 0:
+            return False, "Must allocate at least 1 agent"
+        
+        for pool, count in self.agent_allocation.items():
+            if count < 0:
+                return False, f"Agent count for {pool} cannot be negative"
+            if pool not in self.enabled_pools and count > 0:
+                return False, f"Cannot allocate agents to disabled pool: {pool}"
+        
+        return True, "Valid"
+    
+    def auto_balance_allocation(self) -> None:
+        """Automatically balance agent allocation across enabled pools."""
+        enabled = [p for p in self.enabled_pools if p in ["hook", "remix", "post"]]
+        n_pools = len(enabled)
+        
+        if n_pools == 0:
+            self.agent_allocation = {}
+            return
+        
+        base = self.total_max_agents // n_pools
+        remainder = self.total_max_agents % n_pools
+        
+        allocation = {}
+        for i, pool in enumerate(enabled):
+            allocation[pool] = base + (1 if i < remainder else 0)
+        
+        self.agent_allocation = allocation
 
 class SwarmJobType(str, Enum):
     hook = "hook"
@@ -177,6 +260,7 @@ class SwarmAgentResult(BaseModel):
 
 
 
+class EarningsSummary(BaseModel):
     total_earnings: float = 0
     pending_earnings: float = 0
     paid_earnings: float = 0

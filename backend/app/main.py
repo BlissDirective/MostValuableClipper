@@ -10,7 +10,7 @@ from app.core.logging import setup_logging
 from app.core.events import startup_event, shutdown_event
 from app.api import (
     health, users, clips, pipelines, sources, earnings,
-    webhooks, social, analytics, legal, auth, subscriptions
+    webhooks, social, analytics, legal, auth, subscriptions, swarm
 )
 
 # Setup logging
@@ -64,6 +64,7 @@ app.include_router(subscriptions.router, prefix="/api/v1", tags=["subscriptions"
 app.include_router(webhooks.router, prefix="/api/v1", tags=["webhooks"])
 app.include_router(social.router, prefix="/api/v1", tags=["social"])
 app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
+app.include_router(swarm.router, prefix="/api/v1", tags=["swarm"])
 
 # Legal pages (no API prefix - public pages for social platform requirements)
 app.include_router(legal.router, tags=["legal"])

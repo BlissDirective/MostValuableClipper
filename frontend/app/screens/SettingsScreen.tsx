@@ -67,6 +67,18 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Swarm & AI</Text>
+        <TouchableOpacity style={styles.buttonRow} onPress={() => router.push('/profile/swarm')}>
+          <Text style={styles.buttonLabel}>Agent Allocation</Text>
+          <Text style={styles.chevron}>›</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.buttonRow} onPress={() => router.push('/profile/behavior')}>
+          <Text style={styles.buttonLabel}>Agent Behavior</Text>
+          <Text style={styles.chevron}>›</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account</Text>
         <TouchableOpacity style={styles.buttonRow} onPress={() => router.push('/subscription')}>
           <Text style={styles.buttonLabel}>Subscription & Billing</Text>
