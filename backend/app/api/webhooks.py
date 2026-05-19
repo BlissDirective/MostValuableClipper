@@ -15,7 +15,7 @@ db = SupabaseService()
 
 @router.post("/stripe")
 async def stripe_webhook(request: Request):
-    """Handle Stripe webhook events."""
+    """Handle Stripe webhook events. Real signing secret configured."""
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
     
