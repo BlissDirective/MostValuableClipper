@@ -16,6 +16,8 @@ import {
   ChevronDown,
   Sliders,
   X,
+  BarChart3,
+  Activity,
 } from "lucide-react-native";
 
 import { tokens } from "@/constants/tokens";
@@ -302,6 +304,30 @@ export default function InsightsScreen() {
             </View>
           )}
         </ScrollView>
+
+        {/* Swarm Analysis Actions */}
+        <SectionHeader 
+          title="Swarm Analysis" 
+          subtitle="Run parallel AI agents to analyze and optimize your clips."
+        />
+        <View style={styles.swarmGrid}>
+          <TouchableOpacity 
+            style={[styles.swarmBtn, { backgroundColor: '#ec489920', borderColor: '#ec489940' }]}
+            onPress={() => Alert.alert("Hooks Analysis", "This will run multiple hook analysis agents in parallel.\n\nRequires: A clip with history data.\n\nAgents: recent_7d, recent_30d, all_time, per_platform, by_archetype")}
+          >
+            <BarChart3 size={18} color="#ec4899" />
+            <Text style={[styles.swarmBtnLabel, { color: '#ec4899' }]}>Hooks Analysis</Text>
+            <Text style={styles.swarmBtnDesc}>5 parallel strategies</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.swarmBtn, { backgroundColor: '#f9731620', borderColor: '#f9731640' }]}
+            onPress={() => Alert.alert("A/B Test", "This will run multiple A/B test comparison strategies in parallel.\n\nRequires: A clip with variant data.\n\nAgents: engagement_winner, retention_winner, composite_winner, views_winner, watch_time_winner")}
+          >
+            <Activity size={18} color="#f97316" />
+            <Text style={[styles.swarmBtnLabel, { color: '#f97316' }]}>A/B Test</Text>
+            <Text style={styles.swarmBtnDesc}>5 comparison strategies</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Remix analytics section */}
         <SectionHeader 
@@ -812,6 +838,30 @@ const styles = StyleSheet.create({
     fontFamily: tokens.type.scale.body.family,
     fontSize: tokens.type.scale.body.size,
     color: tokens.color.text.secondary,
+  },
+  swarmGrid: {
+    flexDirection: "row",
+    gap: tokens.spacing.sm,
+    paddingHorizontal: tokens.layout.screenPadding,
+  },
+  swarmBtn: {
+    flex: 1,
+    alignItems: "center",
+    padding: tokens.spacing.md,
+    borderRadius: tokens.radius.lg,
+    borderWidth: 1,
+    gap: tokens.spacing.xs,
+  },
+  swarmBtnLabel: {
+    fontFamily: tokens.type.scale.bodyMedium.family,
+    fontSize: tokens.type.scale.bodyMedium.size,
+    fontWeight: "600",
+    marginTop: tokens.spacing.xs,
+  },
+  swarmBtnDesc: {
+    fontFamily: tokens.type.scale.caption.family,
+    fontSize: tokens.type.scale.caption.size,
+    color: tokens.color.text.tertiary,
   },
   kpiRow: {
     flexDirection: "row",

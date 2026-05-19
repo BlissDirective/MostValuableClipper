@@ -25,12 +25,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
+import SwarmActionSheet from "@/components/SwarmActionSheet";
+import SwarmConfigModal, { SwarmExecutionConfig, SwarmPoolType } from "@/components/SwarmConfigModal";
 import { AccountBadge, Platform } from "@/components/AccountBadge";
 import { MetricChip } from "@/components/MetricChip";
 import { SafetyFlag, SafetyVariant } from "@/components/SafetyFlag";
 import { clipsApi, Clip } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
-import { useSwarmExecution } from "@/lib/api-hooks";
+import { useSwarmExecution, useSwarmAllocation } from "@/lib/api-hooks";
 import { triggerHaptic } from "@/utils/haptics";
 
 interface DetailData {
@@ -62,7 +64,57 @@ export default function ClipDetailScreen() {
   const [clipData, setClipData] = useState<Clip | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const doSignOut = useAuthStore((s) => s.doSignOut);
-  const { isRunning: swarmRunning, runHookSwarm, runRemixSwarm, runPostSwarm } = useSwarmExecution();
+
+  // Swarm action sheet + config modal state
+  const [swarmSheetOpen, setSwarmSheetOpen] = useState(false);
+  const [configuringSwarm, setConfiguringSwarm] = useState<string | null>(null);
+
+  // Swarm allocation data
+  const { allocation, tier, isLoading: allocationLoading } = useSwarmAllocation();
+
+  const {
+    isRunning: swarmRunning,
+    runHookSwarm,
+    runRemixSwarm,
+    runPostSwarm,
+    runABTestSwarm,
+    runMusicMatchSwarm,
+    runThumbnailSwarm,
+    runSafetySwarm,
+    runHooksAnalysisSwarm,
+    runSegmentAnalyzeSwarm,
+    runEditSwarm,
+  } = useSwarmExecution();
+
+  // Pool metadata for config modal
+  const poolMeta = useMemo(() => {
+    const meta: Record<string, { label: string; color: string; desc: string; category: string }> = {
+      hook: { label: 'Hook Generation', color: '#6366f1', desc: 'Generate multiple hook variations with different personas', category: 'Generate' },
+      thumbnail: { label: 'Thumbnail Generation', color: '#8b5cf6', desc: 'Create thumbnails with different style strategies', category: 'Generate' },
+      remix: { label: 'Remix Clip', color: '#10b981', desc: 'Generate AI-powered remix variants', category: 'Edit' },
+      edit: { label: 'Edit Recipe', color: '#06b6d4', desc: 'Apply automated edit recipes (cuts, captions, zoom)', category: 'Edit' },
+      segment_analyze: { label: 'Segment Analysis', color: '#0ea5e9', desc: 'Find best moments: energy peaks, faces, questions', category: 'Edit' },
+      safety: { label: 'Safety Check', color: '#f59e0b', desc: 'Run multi-level safety screening (strict to permissive)', category: 'Analyze' },
+      hooks_analysis: { label: 'Hooks Analysis', color: '#ec4899', desc: 'Analyze historical hook performance patterns', category: 'Analyze' },
+      ab_test: { label: 'A/B Test Analysis', color: '#f97316', desc: 'Compare variants with different winner strategies', category: 'Analyze' },
+      music_match: { label: 'Music Match', color: '#14b8a6', desc: 'Match music tracks by energy, tempo, mood, or contrast', category: 'Enhance' },
+      post: { label: 'Multi-Account Post', color: '#eab308', desc: 'Post to all connected accounts simultaneously', category: 'Post' },
+    };
+    return meta;
+  }, []);
+
+  const getPoolAllocation = useCallback((poolType: string) => {
+    return (allocation && allocation[poolType]) || 1;
+  }, [allocation]);
+
+  const getTierLimit = useCallback(() => {
+    switch (tier) {
+      case 'enterprise': return 10;
+      case 'pro': return 5;
+      case 'basic': return 2;
+      default: return 1;
+    }
+  }, [tier]);
 
   useEffect(() => {
     if (!params.id) return;
@@ -182,42 +234,135 @@ export default function ClipDetailScreen() {
             }
           ]
         );
-      } else if (action === "swarm-hooks") {
-        try {
-          triggerHaptic("heavy");
-          const result = await runHookSwarm(clip.id, "tiktok");
-          Alert.alert(
-            "Swarm Hooks Queued",
-            `${result.agents} hook agents dispatched. Job ID: ${result.job_id.slice(0, 8)}...`
-          );
-        } catch (err: any) {
-          console.warn("[clip-detail] swarm hooks failed:", err.message);
-          Alert.alert("Swarm Failed", err?.detail || "Could not dispatch hook swarm.");
-        }
-      } else if (action === "swarm-remix") {
-        try {
-          triggerHaptic("heavy");
-          const result = await runRemixSwarm(clip.id);
-          Alert.alert(
-            "Swarm Remix Queued",
-            `${result.agents} remix agents dispatched. Job ID: ${result.job_id.slice(0, 8)}...`
-          );
-        } catch (err: any) {
-          console.warn("[clip-detail] swarm remix failed:", err.message);
-          Alert.alert("Swarm Failed", err?.detail || "Could not dispatch remix swarm.");
-        }
-      } else if (action === "swarm-post") {
-        // Swarm post requires connected accounts
-        Alert.alert(
-          "Swarm Post",
-          "Multi-account posting swarm will be available once social accounts are connected."
-        );
-      } else {
-        // Post-MVP: repost actions require AI generation pipeline
-        Alert.alert("Coming soon", "Reposting will be available in a future update.");
+      } else if (action.startsWith("swarm-quick-")) {
+        // Quick-run with defaults (from action sheet play button)
+        const swarmType = action.replace("swarm-quick-", "");
+        handleSwarmQuickRun(swarmType as SwarmPoolType);
+      } else if (action.startsWith("swarm-")) {
+        // Legacy handlers - convert to new config flow
+        const swarmType = action.replace("swarm-", "");
+        setConfiguringSwarm(swarmType);
       }
     },
     [clip.id, router]
+  );
+
+  const handleSwarmQuickRun = useCallback(
+    async (poolType: SwarmPoolType) => {
+      try {
+        triggerHaptic("heavy");
+        let result;
+        switch (poolType) {
+          case "hook":
+            result = await runHookSwarm(clip.id, "tiktok");
+            break;
+          case "remix":
+            result = await runRemixSwarm(clip.id);
+            break;
+          case "thumbnail":
+            result = await runThumbnailSwarm(clip.id);
+            break;
+          case "safety":
+            result = await runSafetySwarm(clip.id);
+            break;
+          case "segment_analyze":
+            result = await runSegmentAnalyzeSwarm(clip.id);
+            break;
+          case "edit":
+            result = await runEditSwarm(clip.id);
+            break;
+          case "music_match":
+            result = await runMusicMatchSwarm(clip.id);
+            break;
+          case "ab_test":
+            result = await runABTestSwarm(clip.id, clip.id);
+            break;
+          case "hooks_analysis":
+            result = await runHooksAnalysisSwarm(clip.id, "tiktok");
+            break;
+          case "post":
+            Alert.alert("Swarm Post", "Multi-account posting swarm will be available once social accounts are connected.");
+            return;
+          default:
+            return;
+        }
+        Alert.alert(
+          `${poolMeta[poolType]?.label || poolType} Swarm Queued`,
+          `${result.agents} agents dispatched. Job ID: ${result.job_id.slice(0, 8)}...`
+        );
+      } catch (err: any) {
+        console.warn(`[clip-detail] swarm ${poolType} failed:`, err.message);
+        Alert.alert("Swarm Failed", err?.detail || `Could not dispatch ${poolType} swarm.`);
+      }
+    },
+    [clip.id, poolMeta, runHookSwarm, runRemixSwarm, runThumbnailSwarm, runSafetySwarm, runSegmentAnalyzeSwarm, runEditSwarm, runMusicMatchSwarm, runABTestSwarm, runHooksAnalysisSwarm]
+  );
+
+  const handleSwarmConfigure = useCallback((actionId: string) => {
+    setSwarmSheetOpen(false);
+    setConfiguringSwarm(actionId);
+  }, []);
+
+  const handleSwarmExecute = useCallback(
+    async (config: SwarmExecutionConfig) => {
+      try {
+        triggerHaptic("heavy");
+        const poolType = config.poolType;
+        let result;
+
+        // Build execution params based on config
+        const params: Record<string, any> = {
+          agent_count: config.agentCount,
+          strategies: config.strategyFilter,
+          ...(config.customOptions || {}),
+        };
+
+        switch (poolType) {
+          case "hook":
+            result = await runHookSwarm(clip.id, params.platform || "tiktok", params);
+            break;
+          case "remix":
+            result = await runRemixSwarm(clip.id, params);
+            break;
+          case "thumbnail":
+            result = await runThumbnailSwarm(clip.id, params);
+            break;
+          case "safety":
+            result = await runSafetySwarm(clip.id, params);
+            break;
+          case "segment_analyze":
+            result = await runSegmentAnalyzeSwarm(clip.id, params);
+            break;
+          case "edit":
+            result = await runEditSwarm(clip.id, params);
+            break;
+          case "music_match":
+            result = await runMusicMatchSwarm(clip.id, params);
+            break;
+          case "ab_test":
+            result = await runABTestSwarm(clip.id, clip.id, params);
+            break;
+          case "hooks_analysis":
+            result = await runHooksAnalysisSwarm(clip.id, params.platform || "tiktok", params);
+            break;
+          case "post":
+            Alert.alert("Swarm Post", "Multi-account posting swarm will be available once social accounts are connected.");
+            return;
+          default:
+            return;
+        }
+
+        setConfiguringSwarm(null);
+        Alert.alert(
+          `${poolMeta[poolType]?.label || poolType} Swarm Dispatched`,
+          `${result.agents} ${config.agentCount > 1 ? 'agents' : 'agent'} dispatched with ${config.strategyFilter.length} strateg${config.strategyFilter.length === 1 ? 'y' : 'ies'}. Job ID: ${result.job_id.slice(0, 8)}...`
+        );
+      } catch (err: any) {
+        console.warn(`[clip-detail] configured swarm failed:`, err.message);
+        Alert.alert("Swarm Failed", err?.detail || "Could not dispatch swarm with custom configuration.");
+      }
+    },
+    [clip.id, poolMeta, runHookSwarm, runRemixSwarm, runThumbnailSwarm, runSafetySwarm, runSegmentAnalyzeSwarm, runEditSwarm, runMusicMatchSwarm, runABTestSwarm, runHooksAnalysisSwarm]
   );
 
   return (
@@ -333,7 +478,7 @@ export default function ClipDetailScreen() {
               variant="primary"
               size="md"
               iconLeft={Bot}
-              onPress={() => handleAction("swarm-hooks")}
+              onPress={() => setSwarmSheetOpen(true)}
               disabled={swarmRunning}
             />
             <ActionButton
@@ -367,6 +512,35 @@ export default function ClipDetailScreen() {
           </View>
         </SafeAreaView>
       </View>
+
+      <SwarmActionSheet
+        visible={swarmSheetOpen}
+        onClose={() => setSwarmSheetOpen(false)}
+        onConfigure={handleSwarmConfigure}
+        onQuickRun={(id) => handleAction(`swarm-quick-${id}`)}
+        disabled={swarmRunning}
+      />
+
+      {configuringSwarm && poolMeta[configuringSwarm] && (
+        <SwarmConfigModal
+          visible={!!configuringSwarm}
+          onClose={() => setConfiguringSwarm(null)}
+          onExecute={handleSwarmExecute}
+          poolType={configuringSwarm as SwarmPoolType}
+          poolLabel={poolMeta[configuringSwarm].label}
+          poolColor={poolMeta[configuringSwarm].color}
+          poolDescription={poolMeta[configuringSwarm].desc}
+          category={poolMeta[configuringSwarm].category}
+          userAllocation={getPoolAllocation(configuringSwarm)}
+          tierLimit={getTierLimit()}
+          availableAgents={getPoolAllocation(configuringSwarm)}
+          availableStrategies={[]}
+          strategyLabels={{}}
+          strategyDescriptions={{}}
+          costPerAgent={0}
+          isExecuting={swarmRunning}
+        />
+      )}
     </>
   );
 }

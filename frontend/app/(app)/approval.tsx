@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Check, ChevronLeft, Edit3, Sparkles, X } from "lucide-react-native";
+import { Check, ChevronLeft, Edit3, Sparkles, X, Bot, Shield, Scissors, Image, Layers } from "lucide-react-native";
 
 import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
@@ -206,6 +206,39 @@ export default function ApprovalScreen() {
         ) : null}
 
         {!done ? (
+          <View style={styles.swarmBar}>
+            <ActionButton
+              label="Safety"
+              variant="ghost"
+              size="sm"
+              iconLeft={Shield}
+              onPress={() => Alert.alert("Safety Swarm", "Run multi-level safety screening on this clip.")}
+            />
+            <ActionButton
+              label="Segments"
+              variant="ghost"
+              size="sm"
+              iconLeft={Layers}
+              onPress={() => Alert.alert("Segment Swarm", "Find best moments with parallel analysis strategies.")}
+            />
+            <ActionButton
+              label="Edit"
+              variant="ghost"
+              size="sm"
+              iconLeft={Scissors}
+              onPress={() => Alert.alert("Edit Swarm", "Apply automated edit recipes in parallel.")}
+            />
+            <ActionButton
+              label="Thumb"
+              variant="ghost"
+              size="sm"
+              iconLeft={Image}
+              onPress={() => Alert.alert("Thumbnail Swarm", "Generate thumbnails with different style strategies.")}
+            />
+          </View>
+        ) : null}
+
+        {!done ? (
           <View style={styles.hintRow}>
             <Sparkles
               size={tokens.icon.size.xs}
@@ -307,6 +340,13 @@ const styles = StyleSheet.create({
     gap: tokens.spacing.sm,
     paddingHorizontal: tokens.layout.screenPadding,
     paddingTop: tokens.spacing.md,
+  },
+  swarmBar: {
+    flexDirection: "row",
+    gap: tokens.spacing.sm,
+    paddingHorizontal: tokens.layout.screenPadding,
+    paddingTop: tokens.spacing.sm,
+    justifyContent: "center",
   },
   hintRow: {
     flexDirection: "row",

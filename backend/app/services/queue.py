@@ -39,6 +39,31 @@ class QueueService:
             return json.loads(result[1])
         return None
     
+    async def enqueue_with_priority(
+        self,
+        queue_name: str,
+        job_data: Dict[str, Any],
+        priority: int = 50,
+    ) -> str:
+        """Enqueue with priority score (higher = processed first).
+        
+        Uses Redis sorted set for priority queue behavior.
+        """
+        job_json = json.dumps(job_data)
+        # Negative score so higher priority comes first (zrange with start=0)
+        self.redis.zadd(f"priority:{queue_name}", {job_json: -priority})
+        return job_data.get("job_id", "")
+    
+    async def dequeue_with_priority(self, queue_name: str) -> Optional[Dict[str, Any]]:
+        """Dequeue from priority queue (highest priority first)."""
+        # Get highest priority item (lowest score due to negation)
+        result = self.redis.zpopmin(f"priority:{queue_name}")
+        if result and len(result) > 0:
+            return json.loads(result[0][0])
+        
+        # Fallback to regular queue
+        return await self.dequeue(queue_name)
+    
     async def get_queue_length(self, queue_name: str) -> int:
         """Get the number of jobs in the queue."""
         return self.redis.llen(f"queue:{queue_name}")

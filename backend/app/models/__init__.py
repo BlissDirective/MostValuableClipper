@@ -269,8 +269,71 @@ class SwarmAgentResult(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class SwarmBatchJobStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
 
-class EarningsSummary(BaseModel):
+class SwarmBatchJob(BaseModel):
+    """A batch swarm execution job processing multiple clips."""
+    batch_id: str
+    user_id: str
+    pool_type: SwarmJobType
+    clip_ids: List[str]
+    total_clips: int
+    processed_clips: int = 0
+    failed_clips: int = 0
+    current_clip_id: Optional[str] = None
+    status: SwarmBatchJobStatus = SwarmBatchJobStatus.queued
+    shared_context: Optional[Dict[str, Any]] = None
+    agent_count: int = 1
+    strategy_filter: Optional[List[str]] = None
+    custom_options: Optional[Dict[str, Any]] = None
+    results_summary: Optional[Dict[str, Any]] = None
+    cost_cents: int = 0
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+class SwarmBatchClipResult(BaseModel):
+    """Result for a single clip within a batch job."""
+    result_id: str
+    batch_id: str
+    clip_id: str
+    agent_index: int
+    status: str = "pending"
+    result_data: Optional[Dict[str, Any]] = None
+    cost_cents: int = 0
+    duration_ms: int = 0
+    error_message: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+class SwarmBatchTemplate(BaseModel):
+    """Saved batch configuration for reuse."""
+    template_id: str
+    user_id: str
+    name: str
+    pool_type: SwarmJobType
+    agent_count: int
+    strategy_filter: Optional[List[str]] = None
+    priority: str = "balanced"
+    shared_context: bool = True
+    custom_options: Optional[Dict[str, Any]] = None
+    is_default: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+class SwarmRateLimit(BaseModel):
+    """Rate limit state for a user."""
+    user_id: str
+    concurrent_batches: int = 0
+    max_concurrent: int = 2
+    daily_clip_count: int = 0
+    max_daily_clips: int = 500
+    last_reset: datetime = Field(default_factory=datetime.utcnow)
+
     total_earnings: float = 0
     pending_earnings: float = 0
     paid_earnings: float = 0

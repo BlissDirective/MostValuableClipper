@@ -16,12 +16,26 @@ const POOL_COLORS: Record<string, string> = {
   hook: '#6366f1',
   remix: '#10b981',
   post: '#f59e0b',
+  ab_test: '#f97316',
+  music_match: '#14b8a6',
+  thumbnail: '#8b5cf6',
+  safety: '#f59e0b',
+  hooks_analysis: '#ec4899',
+  segment_analyze: '#0ea5e9',
+  edit: '#06b6d4',
 };
 
 const POOL_LABELS: Record<string, string> = {
   hook: 'Hook Generation',
   remix: 'Remix / Edit',
   post: 'Social Posting',
+  ab_test: 'A/B Test Analysis',
+  music_match: 'Music Matching',
+  thumbnail: 'Thumbnail Generation',
+  safety: 'Safety Screening',
+  hooks_analysis: 'Hooks Analysis',
+  segment_analyze: 'Segment Analysis',
+  edit: 'Edit Recipes',
 };
 
 const TIER_LABELS: Record<string, string> = {
@@ -33,7 +47,7 @@ const TIER_LABELS: Record<string, string> = {
 
 export default function SwarmSettingsScreen() {
   const router = useRouter();
-  const { allocation, isLoading: allocLoading, setAllocation, enableAutoBalance } = useSwarmAllocation();
+  const { allocation, tier, totalMaxAgents, availableAgents: apiAvailable, autoBalance: apiAutoBalance, isLoading: allocLoading, setAllocation, enableAutoBalance } = useSwarmAllocation();
   const { config, isLoading: configLoading } = useSwarmConfig();
 
   const [localAllocation, setLocalAllocation] = useState<Record<string, number>>({});
@@ -43,12 +57,14 @@ export default function SwarmSettingsScreen() {
   // Sync local state with fetched data
   useEffect(() => {
     if (allocation) {
-      setLocalAllocation({ ...allocation.allocation });
-      setAutoBalance(allocation.auto_balance);
+      setLocalAllocation({ ...allocation });
     }
-  }, [allocation]);
+    if (apiAutoBalance !== undefined) {
+      setAutoBalance(apiAutoBalance);
+    }
+  }, [allocation, apiAutoBalance]);
 
-  const totalMax = config?.total_max_agents || allocation?.total_max_agents || 1;
+  const totalMax = totalMaxAgents || 1;
   const allocatedTotal = Object.values(localAllocation).reduce((sum, n) => sum + n, 0);
   const available = totalMax - allocatedTotal;
 
@@ -121,7 +137,7 @@ export default function SwarmSettingsScreen() {
         <Text style={styles.sectionTitle}>Swarm Tier</Text>
         <View style={styles.tierBadge}>
           <Text style={styles.tierText}>
-            {TIER_LABELS[allocation?.tier || 'free'] || 'Free'}
+            {TIER_LABELS[tier || 'free'] || 'Free'}
           </Text>
         </View>
         <Text style={styles.description}>
@@ -162,7 +178,7 @@ export default function SwarmSettingsScreen() {
           Allocate your {totalMax} agents across swarm types. Drag to adjust.
         </Text>
 
-        {['hook', 'remix', 'post'].map((pool) => {
+        {['hook', 'remix', 'post', 'ab_test', 'music_match', 'thumbnail', 'safety', 'hooks_analysis', 'segment_analyze', 'edit'].map((pool) => {
           const count = localAllocation[pool] || 0;
           const color = POOL_COLORS[pool];
           const isDisabled = autoBalance;

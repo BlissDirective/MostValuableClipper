@@ -13,7 +13,8 @@ from app.services.swarm_orchestrator import SwarmOrchestrator, swarm_orchestrato
 from app.services.swarm_config_service import SwarmConfigService, SwarmJobService
 from app.models import (
     SwarmConfig, SwarmJob, SwarmAgentResult,
-    SwarmTier, SwarmJobStatus
+    SwarmTier, SwarmJobStatus,
+    SwarmBatchJob, SwarmBatchJobStatus, SwarmBatchClipResult
 )
 
 router = APIRouter(prefix="/swarm", tags=["swarm"])
@@ -84,6 +85,65 @@ class SwarmEditRequest(BaseModel):
     clip_id: str
     agent_count: Optional[int] = Field(None, ge=1, le=50)
     recipe_filter: Optional[List[str]] = None
+
+# ─────────────────────────────────────────────────────────────
+# Batch Request / Response Models
+# ─────────────────────────────────────────────────────────────
+
+class SwarmBatchRequest(BaseModel):
+    """Request to execute a swarm on multiple clips in batch.
+    
+    Batch processing shares source analysis context across clips
+    to minimize redundant API calls and reduce costs.
+    """
+    clip_ids: List[str] = Field(..., min_length=1, max_length=100, description="Clips to process (max 100)")
+    pool_type: str = Field(..., description="Swarm pool type: hook, remix, post, ab_test, music_match, thumbnail, safety, hooks_analysis, segment_analyze, edit")
+    agent_count: Optional[int] = Field(None, ge=1, le=50, description="Agents per clip. Uses user's allocation if not provided.")
+    strategy_filter: Optional[List[str]] = None
+    priority: str = Field("balanced", description="Processing priority: cost | balanced | speed")
+    top_k: Optional[int] = Field(None, ge=1, le=100, description="Only process top N clips (smart selection)")
+    shared_context: bool = True
+    custom_options: Optional[Dict[str, Any]] = None
+
+class SwarmBatchClipResultResponse(BaseModel):
+    """Result for a single clip in a batch."""
+    clip_id: str
+    status: str
+    result_data: Optional[Dict[str, Any]] = None
+    cost_cents: int = 0
+    duration_ms: int = 0
+    error_message: Optional[str] = None
+
+class SwarmBatchResponse(BaseModel):
+    """Response from a batch swarm execution."""
+    batch_id: str
+    pool_type: str
+    total_clips: int
+    processed_clips: int
+    failed_clips: int
+    status: str
+    results: List[SwarmBatchClipResultResponse]
+    cost_cents: int
+    estimated_cost_usd: float
+    savings_percent: float
+    duration_ms: int
+    created_at: str
+    completed_at: Optional[str] = None
+
+class SwarmBatchJobListResponse(BaseModel):
+    """List of batch jobs for a user."""
+    jobs: List[Dict[str, Any]]
+    total: int
+
+class SwarmBatchJobDetailResponse(BaseModel):
+    """Detailed view of a batch job with per-clip results."""
+    job: Dict[str, Any]
+    clip_results: List[Dict[str, Any]]
+
+
+# ─────────────────────────────────────────────────────────────
+# Config Update / Allocation Models
+# ─────────────────────────────────────────────────────────────
 
 class SwarmConfigUpdateRequest(BaseModel):
     enabled_pools: Optional[List[str]] = None
@@ -711,4 +771,300 @@ async def estimate_swarm_cost(
         "estimated_cost_usd": round(cost / 100, 2),
         "daily_budget_cents": config.daily_budget_cents,
         "within_budget": await SwarmConfigService.check_budget(user.id, pool_type, count),
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Batch Execution Endpoints
+# ─────────────────────────────────────────────────────────────
+
+@router.post("/batch", response_model=SwarmBatchResponse)
+async def execute_batch_swarm(
+    request: SwarmBatchRequest,
+    user=Depends(get_current_user)
+):
+    """Queue a swarm batch job for async background processing.
+    
+    Creates a batch job and enqueues it to the Redis queue.
+    Returns immediately with a batch_id for polling progress.
+    
+    The batch will be processed by a background worker with:
+    - Shared source analysis across clips (cost savings)
+    - Real-time progress updates via Supabase realtime
+    - Partial results streaming as clips complete
+    
+    Priority modes:
+    - **cost**: Sequential processing, shared context, minimal agents
+    - **balanced**: Smart selection — analyze all, deep-dive on top performers
+    - **speed**: Max parallel, process all simultaneously
+    """
+    # Validate clip_ids exist and belong to user
+    if len(request.clip_ids) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 100 clips per batch"
+        )
+    
+    # Determine processing strategy based on priority
+    priority = request.priority.lower()
+    if priority not in ("cost", "balanced", "speed"):
+        priority = "balanced"
+    
+    # Enqueue batch for async processing
+    from app.services.swarm_batch_service import SwarmBatchService
+    
+    batch_service = SwarmBatchService(swarm_orchestrator)
+    
+    result = await batch_service.enqueue_batch(
+        clip_ids=request.clip_ids,
+        pool_type=request.pool_type,
+        user_id=user.id,
+        agent_count=request.agent_count,
+        strategy_filter=request.strategy_filter,
+        priority=priority,
+        top_k=request.top_k,
+        shared_context=request.shared_context,
+        custom_options=request.custom_options or {},
+    )
+    
+    if "error" in result and not result.get("batch_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"]
+        )
+    
+    return SwarmBatchResponse(**result)
+
+
+@router.get("/batch", response_model=SwarmBatchJobListResponse)
+async def list_batch_jobs(
+    limit: int = 50,
+    offset: int = 0,
+    user=Depends(get_current_user)
+):
+    """List batch swarm jobs for the current user."""
+    from app.services.swarm_batch_service import SwarmBatchService
+    
+    batch_service = SwarmBatchService(swarm_orchestrator)
+    jobs = await batch_service.list_batch_jobs(user.id, limit=limit, offset=offset)
+    
+    return SwarmBatchJobListResponse(
+        jobs=jobs,
+        total=len(jobs)
+    )
+
+
+@router.get("/batch/{batch_id}", response_model=SwarmBatchJobDetailResponse)
+async def get_batch_job(
+    batch_id: str,
+    user=Depends(get_current_user)
+):
+    """Get details of a specific batch job including per-clip results."""
+    from app.services.swarm_batch_service import SwarmBatchService
+    
+    batch_service = SwarmBatchService(swarm_orchestrator)
+    job = await batch_service.get_batch_job(batch_id)
+    
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Batch job not found"
+        )
+    
+    if job["user_id"] != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this batch job"
+        )
+    
+    clip_results = await batch_service.get_batch_clip_results(batch_id)
+    
+    return SwarmBatchJobDetailResponse(
+        job=job,
+        clip_results=clip_results
+    )
+
+
+@router.delete("/batch/{batch_id}")
+async def cancel_batch_job(
+    batch_id: str,
+    user=Depends(get_current_user)
+):
+    """Cancel a running batch job."""
+    from app.services.swarm_batch_service import SwarmBatchService
+    
+    batch_service = SwarmBatchService(swarm_orchestrator)
+    job = await batch_service.get_batch_job(batch_id)
+    
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Batch job not found"
+        )
+    
+    if job["user_id"] != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to cancel this batch job"
+        )
+    
+    success = await batch_service.cancel_batch_job(batch_id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not cancel batch job — it may already be completed or failed"
+        )
+    
+    return {"success": True, "batch_id": batch_id, "status": "cancelled"}
+
+
+@router.post("/batch/{batch_id}/estimate-cost")
+async def estimate_batch_cost(
+    batch_id: str,
+    user=Depends(get_current_user)
+):
+    """Get cost estimate for a batch before execution.
+    
+    Returns per-clip and total cost breakdown with savings vs individual execution.
+    """
+    from app.services.swarm_batch_service import SwarmBatchService
+    
+    batch_service = SwarmBatchService(swarm_orchestrator)
+    job = await batch_service.get_batch_job(batch_id)
+    
+    if not job or job["user_id"] != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Batch job not found"
+        )
+    
+    return await batch_service.estimate_batch_cost(batch_id)
+
+
+# ─────────────────────────────────────────────────────────────
+# Batch Templates
+# ─────────────────────────────────────────────────────────────
+
+class TemplateCreateRequest(BaseModel):
+    name: str
+    pool_type: str
+    agent_count: Optional[int] = None
+    strategy_filter: Optional[List[str]] = None
+    priority: str = "balanced"
+    shared_context: bool = True
+    custom_options: Optional[Dict[str, Any]] = None
+    is_default: bool = False
+
+@router.post("/batch/templates")
+async def create_batch_template(
+    request: TemplateCreateRequest,
+    user=Depends(get_current_user)
+):
+    """Create a saved batch configuration template."""
+    from app.services.swarm_batch_service import SwarmBatchService
+    
+    service = SwarmBatchService()
+    result = await service.create_template(
+        user_id=str(user.id),
+        name=request.name,
+        pool_type=request.pool_type,
+        agent_count=request.agent_count,
+        strategy_filter=request.strategy_filter,
+        priority=request.priority,
+        shared_context=request.shared_context,
+        custom_options=request.custom_options,
+        is_default=request.is_default,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@router.get("/batch/templates")
+async def list_batch_templates(
+    user=Depends(get_current_user)
+):
+    """List all batch templates for the current user."""
+    from app.services.swarm_batch_service import SwarmBatchService
+    
+    service = SwarmBatchService()
+    return await service.list_templates(str(user.id))
+
+@router.delete("/batch/templates/{template_id}")
+async def delete_batch_template(
+    template_id: str,
+    user=Depends(get_current_user)
+):
+    """Delete a batch template."""
+    from app.services.swarm_batch_service import SwarmBatchService
+    
+    service = SwarmBatchService()
+    success = await service.delete_template(template_id, str(user.id))
+    if not success:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"success": True}
+
+
+# ─────────────────────────────────────────────────────────────
+# Batch Queue Depth & ETA
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/batch/queue-depth")
+async def get_batch_queue_depth(
+    user=Depends(get_current_user)
+):
+    """Get current batch queue depth and estimated wait time."""
+    from app.services.queue import QueueService
+    
+    queue = QueueService()
+    depth = await queue.get_queue_length("swarm_batch")
+    
+    # Estimate: ~30s per clip with 5 concurrent
+    est_seconds = depth * 6  # rough estimate
+    
+    return {
+        "queue_depth": depth,
+        "estimated_wait_seconds": est_seconds,
+        "estimated_wait_formatted": f"{est_seconds // 60}m {est_seconds % 60}s" if est_seconds > 60 else f"{est_seconds}s",
+    }
+
+@router.get("/batch/{batch_id}/eta")
+async def get_batch_eta(
+    batch_id: str,
+    user=Depends(get_current_user)
+):
+    """Get estimated completion time for a batch job."""
+    from app.services.swarm_batch_service import SwarmBatchService
+    
+    service = SwarmBatchService()
+    job = await service.get_batch_job(batch_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Batch job not found")
+    
+    if job.get("user_id") != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this batch job")
+    
+    if job.get("status") in ("completed", "failed", "cancelled"):
+        return {"eta_seconds": 0, "eta_formatted": "Done", "status": job["status"]}
+    
+    total = job.get("total_clips", 0)
+    processed = job.get("processed_clips", 0)
+    remaining = total - processed
+    
+    # Estimate ~15s per clip for balanced, 8s for speed, 25s for cost
+    priority = job.get("results_summary", {}).get("priority", "balanced")
+    seconds_per_clip = {"speed": 8, "balanced": 15, "cost": 25}.get(priority, 15)
+    
+    # Adjust for wave overhead
+    waves = job.get("results_summary", {}).get("waves", 1)
+    eta_seconds = remaining * seconds_per_clip + (waves * 5)
+    
+    return {
+        "eta_seconds": eta_seconds,
+        "eta_formatted": f"{eta_seconds // 60}m {eta_seconds % 60}s" if eta_seconds > 60 else f"{eta_seconds}s",
+        "remaining_clips": remaining,
+        "status": job["status"],
+        "current_wave": job.get("results_summary", {}).get("wave", 1),
+        "total_waves": waves,
     }

@@ -1,6 +1,6 @@
 import React, { memo, useEffect, useRef } from "react";
 import { Animated, Pressable, StyleSheet, Text, View, ViewStyle } from "react-native";
-import { AlertTriangle, Film, Radio, RefreshCw, Repeat, Trash2, TrendingUp, LucideIcon } from "lucide-react-native";
+import { AlertTriangle, CheckCircle2, Film, Radio, RefreshCw, Repeat, Trash2, TrendingUp, LucideIcon } from "lucide-react-native";
 import { tokens } from "@/constants/tokens";
 import { triggerHaptic } from "@/utils/haptics";
 import { AccountBadge, Platform } from "./AccountBadge";
@@ -33,11 +33,14 @@ export interface ClipCardProps {
   variant?: ClipVariant;
   onAction?: (actionId: string) => void;
   onPress?: () => void;
+  onLongPress?: () => void;
+  selected?: boolean;
+  selectionMode?: boolean;
   style?: ViewStyle;
   testID?: string;
 }
 
-function ClipCardComponent({ clip, variant = "feed", onAction, onPress, style, testID }: ClipCardProps) {
+function ClipCardComponent({ clip, variant = "feed", onAction, onPress, onLongPress, selected, selectionMode, style, testID }: ClipCardProps) {
   const shimmer = useRef(new Animated.Value(0)).current;
   const isProcessing = clip.state === "processing";
   const isQueued = clip.state === "queued";
@@ -72,18 +75,33 @@ function ClipCardComponent({ clip, variant = "feed", onAction, onPress, style, t
     onAction?.(id);
   };
 
+  const selectionOverlay = selectionMode ? (
+    <View style={[styles.selectionOverlay, selected && styles.selectionOverlayActive]}>
+      <View style={[styles.selectionCheck, selected && styles.selectionCheckActive]}>
+        {selected && <CheckCircle2 size={20} color={tokens.color.text.inverse} strokeWidth={2} />}
+      </View>
+    </View>
+  ) : null;
+
   return (
     <Pressable
       onPress={() => {
         if (isProcessing) return;
         triggerHaptic("selection");
-        onPress?.();
+        if (selectionMode) {
+          onAction?.(selected ? "deselect" : "select");
+        } else {
+          onPress?.();
+        }
       }}
+      onLongPress={onLongPress}
+      delayLongPress={400}
       testID={testID}
       style={({ pressed }) => [
         styles.card,
         { borderColor },
         pressed && !isProcessing ? styles.pressed : null,
+        selected ? styles.cardSelected : null,
         style,
       ]}
     >
@@ -108,6 +126,7 @@ function ClipCardComponent({ clip, variant = "feed", onAction, onPress, style, t
             />
           </View>
         ) : null}
+        {selectionOverlay}
         {isFailed ? (
           <View style={styles.failedOverlay}>
             <AlertTriangle size={tokens.icon.size.lg} color={tokens.color.status.danger} strokeWidth={tokens.icon.stroke.bold} />
@@ -289,6 +308,34 @@ const styles = StyleSheet.create({
     letterSpacing: tokens.type.scale.caption.letterSpacing,
     color: tokens.color.text.tertiary,
   },
+  cardSelected: {
+    borderColor: tokens.color.accent.primary,
+    borderWidth: 2,
+  },
+  selectionOverlay: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 10,
+  },
+  selectionOverlayActive: {
+    top: 8,
+    right: 8,
+  },
+  selectionCheck: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: tokens.color.text.inverse,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectionCheckActive: {
+    backgroundColor: tokens.color.accent.primary,
+    borderColor: tokens.color.accent.primary,
+  },
 });
 
-export default ClipCard;
+export const ClipCard = memo(ClipCardComponent);
