@@ -118,7 +118,65 @@ class Earnings(BaseModel):
     transaction_id: Optional[str] = None
     created_at: datetime
 
-class EarningsSummary(BaseModel):
+class SwarmTier(str, Enum):
+    free = "free"
+    basic = "basic"
+    pro = "pro"
+    enterprise = "enterprise"
+
+class SwarmConfig(BaseModel):
+    """User's swarm configuration with tier-based limits."""
+    user_id: str
+    tier: SwarmTier = SwarmTier.free
+    max_hook_agents: int = Field(1, ge=1, le=50)
+    max_remix_agents: int = Field(1, ge=1, le=50)
+    max_post_agents: int = Field(1, ge=1, le=50)
+    enabled_pools: List[str] = Field(default_factory=lambda: ["hook", "remix", "post"])
+    daily_budget_cents: int = Field(0, ge=0, description="Daily budget in cents. 0 = unlimited")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+class SwarmJobType(str, Enum):
+    hook = "hook"
+    remix = "remix"
+    post = "post"
+
+class SwarmJobStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    partial = "partial"
+
+class SwarmJob(BaseModel):
+    """A swarm execution job tracking parallel agent execution."""
+    job_id: str
+    user_id: str
+    job_type: SwarmJobType
+    status: SwarmJobStatus = SwarmJobStatus.queued
+    total_agents: int = 0
+    completed_agents: int = 0
+    failed_agents: int = 0
+    results_summary: Optional[Dict[str, Any]] = None
+    cost_cents: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None
+
+class SwarmAgentResult(BaseModel):
+    """Result from one agent in a swarm execution."""
+    result_id: str
+    job_id: str
+    agent_index: int
+    agent_persona: str
+    status: str = "pending"  # pending, completed, failed
+    result_data: Optional[Dict[str, Any]] = None
+    cost_cents: int = 0
+    duration_ms: int = 0
+    error_message: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+
     total_earnings: float = 0
     pending_earnings: float = 0
     paid_earnings: float = 0
