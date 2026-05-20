@@ -337,5 +337,3 @@ const styles = StyleSheet.create({
     borderColor: tokens.color.accent.primary,
   },
 });
-
-export const ClipCard = memo(ClipCardComponent);
