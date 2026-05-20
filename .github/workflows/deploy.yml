@@ -61,6 +61,10 @@ jobs:
           
       - name: Install EAS CLI
         run: bun add -g eas-cli
+
+      - name: Prebuild check (catch JS bundle errors early)
+        run: npx expo export --platform android 2>&1 || true
+        working-directory: frontend
         
       - name: Build EAS Update
         run: eas build --profile preview --platform android --non-interactive
