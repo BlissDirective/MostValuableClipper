@@ -1,5 +1,6 @@
 FROM python:3.11-slim
 
+ARG SOURCE_DIR=.
 WORKDIR /app
 
 # Install system dependencies
@@ -8,11 +9,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
-COPY requirements.txt .
+COPY ${SOURCE_DIR}/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
-COPY . .
+COPY ${SOURCE_DIR}/ .
 
 # Run migrations on startup (optional, can be done separately)
 # RUN python -m app.migrations

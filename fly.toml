@@ -1,0 +1,29 @@
+app = "mvc-backend"
+primary_region = "lax"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+  [build.args]
+    SOURCE_DIR = "backend"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[http_service.checks]]
+  grace_period = "5s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/api/v1/health"
+
+[env]
+  APP_ENV = "production"
+
+[[mounts]]
+  source = "mvc_backend_data"
+  destination = "/data"
