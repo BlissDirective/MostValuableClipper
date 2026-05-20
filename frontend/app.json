@@ -19,7 +19,8 @@
       "buildNumber": "1.0.0",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "BlissClip saves your generated clips to your photo library so you can share them to social media.",
-        "NSPhotoLibraryAddUsageDescription": "BlissClip saves your generated clips to your photo library."
+        "NSPhotoLibraryAddUsageDescription": "BlissClip saves your generated clips to your photo library.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

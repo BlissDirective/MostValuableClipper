@@ -63,6 +63,6 @@ jobs:
         run: bun add -g eas-cli
         
       - name: Build EAS Update
-        run: eas build --profile preview --platform all --non-interactive
+        run: eas build --profile preview --platform android --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
