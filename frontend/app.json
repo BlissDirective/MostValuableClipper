@@ -29,7 +29,16 @@
       },
       "package": "com.blissdirective.blissclip",
       "versionCode": 1,
-      "permissions": ["READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"]
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
@@ -46,11 +55,19 @@
       "expo-image-picker",
       "expo-sharing",
       "expo-file-system",
-      "expo-media-library",
-      "expo-haptics"
+      "expo-media-library"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": "https://rork.com/"
+      },
+      "eas": {
+        "projectId": "52cb0fd6-2a33-4e6c-b574-0166355061b7"
+      }
+    },
+    "owner": "conradsteinmeyer1s-organization"
   }
 }
