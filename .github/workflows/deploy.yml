@@ -23,9 +23,10 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@master
         
       - name: Deploy to Fly.io
-        run: flyctl deploy --app mvc-backend
+        run: flyctl deploy --app mvc-backend --config fly.toml
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        working-directory: backend
 
   update-database:
     runs-on: ubuntu-latest
