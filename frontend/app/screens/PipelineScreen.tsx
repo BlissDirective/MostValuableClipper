@@ -9,9 +9,9 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { usePipelines, useClips } from '../lib/api-hooks';
-import { useAppStore } from '../lib/store';
-import { design, haptics } from '../constants';
+import { usePipelines, useClips } from '@/lib/api-hooks';
+import { useAppStore } from '@/lib/store';
+import { design, haptics } from '@/constants';
 
 /**
  * PipelineScreen — Real API-integrated pipeline list
