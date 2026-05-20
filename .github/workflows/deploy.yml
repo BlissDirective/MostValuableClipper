@@ -8,6 +8,7 @@ on:
       - 'frontend/**'
       - '.github/workflows/deploy.yml'
       - 'db_schema_update.sql'
+  workflow_dispatch:
 
 jobs:
   deploy-backend:
