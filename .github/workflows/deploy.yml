@@ -67,6 +67,22 @@ jobs:
         working-directory: frontend
         
       - name: Build EAS Update
-        run: eas build --profile preview --platform android --non-interactive
+        run: EXPO_DEBUG=1 eas build --profile preview --platform android --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        working-directory: frontend
+        
+      - name: Fetch EAS build logs on failure
+        if: failure()
+        run: |
+          echo "=== Fetching latest build logs ==="
+          BUILD_JSON=$(eas build:list --platform android --limit 1 --json --non-interactive 2>/dev/null || echo "[]")
+          BUILD_ID=$(echo "$BUILD_JSON" | jq -r '.[0].id // empty')
+          if [ -n "$BUILD_ID" ]; then
+            echo "Build ID: $BUILD_ID"
+            echo "Build URL: https://expo.dev/accounts/conradsteinmeyer1s-organization/projects/bliss-clip/builds/$BUILD_ID"
+            eas build:logs --id "$BUILD_ID" --non-interactive 2>&1 || echo "Could not fetch logs"
+          fi
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        working-directory: frontend
