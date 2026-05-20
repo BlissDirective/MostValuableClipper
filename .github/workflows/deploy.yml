@@ -64,6 +64,10 @@ jobs:
           
       - name: Install EAS CLI
         run: bun add -g eas-cli
+
+      - name: Debug Expo Config
+        run: npx expo config --json 2>&1 || true
+        working-directory: frontend
         
       - name: Build EAS Update
         run: eas build --profile preview --platform all --non-interactive
