@@ -59,3 +59,11 @@ package-lock.json
 *.bak
 *.tmp
 scripts/
+!backend/scripts/
+
+# Music files — large binaries, downloaded at deploy time
+# Run: python3 backend/scripts/download_music_library.py
+backend/app/music/**/*.mp3
+backend/app/music/*.mp3
+# Keep catalog (metadata only, ~50 KB) and mood subdirs structure
+!backend/app/music/catalog.json
