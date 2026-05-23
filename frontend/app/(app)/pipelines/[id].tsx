@@ -122,7 +122,7 @@ export default function PipelineDetailScreen() {
   const [cadenceOpen, setCadenceOpen] = useState<boolean>(false);
 
   useEffect(() => {
-    if (id) fetchSources(id);
+    if (id) fetchSources();
   }, [id, fetchSources]);
 
   if (!pipeline) {
@@ -151,19 +151,19 @@ export default function PipelineDetailScreen() {
         {
           text: "User upload",
           onPress: () => {
-            addSource(id, { name: "new_upload.mp4", kind: "upload", sourceType: "upload", sourceUrl: "" });
+            addSource(id, { name: "new_upload.mp4", kind: "upload", sourceType: "upload", sourceUrl: "", status: "pending" });
           },
         },
         {
           text: "Creator-licensed",
           onPress: () => {
-            addSource(id, { name: "Licensed catalog", kind: "creator-licensed", sourceType: "youtube", sourceUrl: "" });
+            addSource(id, { name: "Licensed catalog", kind: "creator-licensed", sourceType: "youtube", sourceUrl: "", status: "pending" });
           },
         },
         {
           text: "CC archive",
           onPress: () => {
-            addSource(id, { name: "Public domain archive", kind: "cc-archive", sourceType: "rss", sourceUrl: "" });
+            addSource(id, { name: "Public domain archive", kind: "cc-archive", sourceType: "rss", sourceUrl: "", status: "pending" });
           },
         },
         { text: "Cancel", style: "cancel" },

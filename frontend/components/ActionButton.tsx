@@ -17,13 +17,14 @@ export interface ActionButtonProps {
   disabled?: boolean;
   onPress?: () => void;
   fullWidth?: boolean;
+  style?: import('react-native').ViewStyle;
   testID?: string;
 }
 
 const SIZE_HEIGHT: Record<ActionButtonSize, number> = { sm: 32, md: 44, lg: 56 };
 const SIZE_PADDING: Record<ActionButtonSize, number> = { sm: tokens.spacing.sm, md: tokens.spacing.md, lg: tokens.spacing.lg };
-const SIZE_FONT: Record<ActionButtonSize, typeof tokens.type.scale.body> = {
-  sm: tokens.type.scale.caption as never,
+const SIZE_FONT: Record<ActionButtonSize, { family: string; size: number; lineHeight: number; letterSpacing: number; weight: string }> = {
+  sm: tokens.type.scale.caption,
   md: tokens.type.scale.bodyMedium,
   lg: tokens.type.scale.h3,
 };
@@ -38,6 +39,7 @@ function ActionButtonComponent({
   disabled = false,
   onPress,
   fullWidth = false,
+  style: customStyle,
   testID,
 }: ActionButtonProps) {
   const [pressed, setPressed] = useState<boolean>(false);
@@ -88,7 +90,7 @@ function ActionButtonComponent({
       testID={testID}
       accessibilityRole="button"
       accessibilityState={{ disabled: disabled || loading, busy: loading }}
-      style={[styles.base, containerStyle]}
+      style={[styles.base, containerStyle, customStyle]}
     >
       {loading ? (
         <ActivityIndicator color={fg} size="small" />

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 
 export default function AuthScreen() {
   const router = useRouter();
@@ -11,6 +11,8 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const signIn = useAuthStore((s) => s.signIn);
+  const signUp = useAuthStore((s) => s.signUp);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -31,12 +33,7 @@ export default function AuthScreen() {
     }
     setLoading(true);
     try {
-      const response = await api.post<{ access_token: string; user: any }>('/auth/login', {
-        email,
-        password,
-      });
-      await AsyncStorage.setItem('auth_token', response.access_token);
-      await AsyncStorage.setItem('user', JSON.stringify(response.user));
+      await signIn(email, password);
       router.replace('/(tabs)');
     } catch (err: any) {
       Alert.alert('Login Failed', err.message || 'Invalid credentials');
@@ -60,13 +57,7 @@ export default function AuthScreen() {
     }
     setLoading(true);
     try {
-      const response = await api.post<{ access_token: string; user: any }>('/auth/register', {
-        email,
-        password,
-        full_name: fullName,
-      });
-      await AsyncStorage.setItem('auth_token', response.access_token);
-      await AsyncStorage.setItem('user', JSON.stringify(response.user));
+      await signUp(email, password, fullName);
       router.replace('/(tabs)');
     } catch (err: any) {
       Alert.alert('Signup Failed', err.message || 'Could not create account');

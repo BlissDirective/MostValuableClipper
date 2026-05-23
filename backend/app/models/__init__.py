@@ -40,6 +40,17 @@ class Clip(BaseModel):
     platform_posts: Optional[List[PlatformPost]] = []
     created_at: datetime
     updated_at: datetime
+    
+    # Metrics — synced from platforms via MetricsSyncScheduler
+    views: Optional[int] = None
+    likes: Optional[int] = None
+    shares: Optional[int] = None
+    comments: Optional[int] = None
+    watch_time_seconds: Optional[float] = None
+    retention_pct: Optional[float] = None
+    earnings_cents: Optional[int] = None
+    metrics_synced_at: Optional[datetime] = None
+    platform_metrics: Optional[Dict[str, Any]] = None
 
 class ClipCreate(BaseModel):
     title: Optional[str] = None

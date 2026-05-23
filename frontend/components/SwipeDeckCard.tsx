@@ -54,7 +54,7 @@ function SwipeDeckCardComponent({
 
   const handleLongPressStart = useCallback(() => {
     if (stackPosition !== 0 || !onLongPressRemix) return;
-    triggerHaptic("light");
+    triggerHaptic("selection");
     
     Animated.timing(scaleAnim, {
       toValue: 0.97,
@@ -63,7 +63,7 @@ function SwipeDeckCardComponent({
     }).start();
 
     longPressRef.current = setTimeout(() => {
-      triggerHaptic("heavy");
+      triggerHaptic("blockTriggered");
       setRemixConfirm(true);
     }, 500);
   }, [stackPosition, onLongPressRemix, scaleAnim]);

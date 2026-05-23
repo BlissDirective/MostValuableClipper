@@ -8,7 +8,7 @@ import { ActionButton } from "@/components/ActionButton";
 import { useAuthStore } from "@/lib/store";
 
 export default function ThemeInputScreen() {
-  const theme = useAuthStore((s) => s.draft.theme);
+  const theme = useAuthStore((s) => (s.draft as any).theme);
   const setTheme = useAuthStore((s) => s.setTheme);
   const canContinue = theme.trim().length >= 3;
 

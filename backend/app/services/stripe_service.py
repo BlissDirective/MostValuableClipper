@@ -91,6 +91,27 @@ class StripeService:
         return product
     
     @staticmethod
+    async def list_invoices(customer_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """List recent invoices for a customer."""
+        invoices = stripe.Invoice.list(
+            customer=customer_id,
+            limit=limit
+        )
+        return [
+            {
+                "id": inv.id,
+                "amount_due": inv.amount_due,
+                "amount_paid": inv.amount_paid,
+                "status": inv.status,
+                "created": inv.created,
+                "pdf_url": inv.invoice_pdf,
+                "period_start": inv.period_start if hasattr(inv, 'period_start') else None,
+                "period_end": inv.period_end if hasattr(inv, 'period_end') else None,
+            }
+            for inv in invoices.data
+        ]
+
+    @staticmethod
     async def create_price(
         product_id: str,
         unit_amount_cents: int,

@@ -9,6 +9,8 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
+import { Activity } from "lucide-react-native";
+import { EmptyState } from "@/components/EmptyState";
 import { usePipelines, useClips } from '@/lib/api-hooks';
 import { useAppStore } from '@/lib/store';
 import { design, haptics } from '@/constants';
@@ -44,8 +46,8 @@ export function PipelineScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Create',
-          onPress: async (name) => {
-            if (!name) return;
+          onPress: async (name?: string) => {
+            if (!name || !name.trim()) return;
             haptics.medium();
             try {
               await createPipeline.mutate({
@@ -106,10 +108,16 @@ export function PipelineScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No pipelines yet</Text>
-            <Text style={styles.emptySub}>Tap "New" to create one</Text>
-          </View>
+          <EmptyState
+            icon={Activity}
+            title="No pipelines yet"
+            subtitle="Create your first pipeline to start generating clips automatically."
+            actionLabel="Create Pipeline"
+            onAction={() => {
+              // Navigate to new pipeline or show modal
+            }}
+            size="md"
+          />
         }
       />
     </View>

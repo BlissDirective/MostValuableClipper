@@ -16,6 +16,9 @@ import { View } from "react-native";
 
 import { tokens } from "@/constants/tokens";
 import { useAuthStore } from "@/lib/store";
+import { ToastProvider } from "@/components/ToastProvider";
+
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -30,12 +33,11 @@ function AuthGate() {
   const checkSession = useAuthStore((s) => s.checkSession);
 
   useEffect(() => {
-    // Check for existing session on mount
     checkSession();
   }, []);
 
   useEffect(() => {
-    if (isLoading) return; // Wait until session check completes
+    if (isLoading) return;
 
     const first = segments[0] as string | undefined;
     const inAuth = first === "(auth)";
@@ -44,7 +46,6 @@ function AuthGate() {
     if (!isAuthenticated && !inAuth) {
       router.replace("/(auth)/welcome");
     } else if (isAuthenticated && !hasOnboarded && !inAuth) {
-      // New users must complete onboarding before accessing the app
       router.replace("/(auth)/theme-input");
     } else if (isAuthenticated && hasOnboarded && !inApp) {
       router.replace("/(app)");
@@ -88,8 +89,12 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <QueryClientProvider client={queryClient}>
-          <AuthGate />
-          <StatusBar style="light" />
+          <ThemeProvider>
+            <ToastProvider>
+              <AuthGate />
+              <StatusBar style="auto" />
+            </ToastProvider>
+          </ThemeProvider>
         </QueryClientProvider>
       </GestureHandlerRootView>
     </SafeAreaProvider>

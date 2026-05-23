@@ -148,6 +148,53 @@ class ZernioService:
             response.raise_for_status()
             return response.json()
     
+    async def get_oauth_url(self, platform: str, profile_id: str, redirect_url: str) -> Dict[str, Any]:
+        """Get OAuth authorization URL for a platform.
+        
+        Args:
+            platform: Platform name (tiktok, instagram, youtube, etc.)
+            profile_id: Your Zernio profile ID
+            redirect_url: URL to redirect user after authorization
+            
+        Returns:
+            Dict with auth_url and other connection metadata
+        """
+        mapped = self.map_platform_to_zernio(platform)
+        params = {
+            "profileId": profile_id,
+            "redirect_url": redirect_url
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.BASE_URL}/connect/{mapped}",
+                headers=self._headers(),
+                params=params,
+                timeout=30
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    async def handle_oauth_callback(self, platform: str, query_params: Dict[str, str]) -> Dict[str, Any]:
+        """Complete OAuth callback by exchanging tokens with Zernio.
+        
+        Args:
+            platform: Platform name
+            query_params: Query parameters from the OAuth redirect (accountId, handle, etc.)
+            
+        Returns:
+            Connected account details
+        """
+        mapped = self.map_platform_to_zernio(platform)
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.BASE_URL}/connect/{mapped}",
+                headers=self._headers(),
+                json=query_params,
+                timeout=30
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def get_platforms(self) -> List[Dict[str, Any]]:
         """List all supported platforms and their capabilities."""
         async with httpx.AsyncClient() as client:

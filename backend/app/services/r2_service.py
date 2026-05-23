@@ -5,11 +5,15 @@ from typing import Optional, BinaryIO
 from app.core.config import settings
 
 class R2Service:
-    """Cloudflare R2 object storage service.
+    """Cloudflare R2 object storage service with CDN support.
     
     Supports two auth methods:
     1. S3-style Access Key ID + Secret Access Key (preferred for boto3)
     2. Cloudflare API Token (falls back to REST API for uploads/downloads)
+    
+    CDN Configuration:
+    - Set CLOUDFLARE_R2_CDN_URL to serve public files via CDN
+    - Default: https://cdn.blissclip.io (Cloudflare proxied)
     """
     
     def __init__(self):
@@ -17,6 +21,7 @@ class R2Service:
         self.endpoint = settings.CLOUDFLARE_R2_ENDPOINT
         self.account_id = settings.CLOUDFLARE_ACCOUNT_ID
         self.api_token = settings.CLOUDFLARE_R2_API_TOKEN
+        self.cdn_url = getattr(settings, 'CLOUDFLARE_R2_CDN_URL', None) or os.environ.get('CLOUDFLARE_R2_CDN_URL', '')
         
         # Check if we have S3-style keys
         has_s3_keys = (
@@ -130,3 +135,25 @@ class R2Service:
         
         response = self.client.list_objects_v2(**kwargs)
         return response.get("Contents", [])
+    
+    def get_cdn_url(self, key: str) -> str:
+        """Get a CDN URL for public delivery.
+        
+        Uses the configured CDN domain if available, otherwise falls back
+        to the R2 endpoint. CDN URLs are public and do not expire.
+        
+        Args:
+            key: R2 object key (e.g., "clips/abc123.mp4")
+        
+        Returns:
+            CDN URL like https://cdn.blissclip.io/clips/abc123.mp4
+        """
+        if self.cdn_url:
+            # Ensure no trailing slash on CDN URL, no leading slash on key
+            cdn = self.cdn_url.rstrip("/")
+            key_clean = key.lstrip("/")
+            return f"{cdn}/{key_clean}"
+        
+        # Fallback to R2 endpoint (not CDN, but public if bucket is public)
+        endpoint = self.endpoint.rstrip("/")
+        return f"{endpoint}/{self.bucket}/{key.lstrip('/')}"

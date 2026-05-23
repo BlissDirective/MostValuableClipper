@@ -1,3 +1,2 @@
 # API routes
-from app.api import swarm
-
+from app.api import swarm, worker, agents

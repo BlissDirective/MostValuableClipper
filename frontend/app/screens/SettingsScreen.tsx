@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '@/lib/api';
+import { usersApi } from '@/lib/api';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -36,7 +36,7 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await api.delete('/users/me');
+              await usersApi.deleteAccount();
               await AsyncStorage.multiRemove(['auth_token', 'user']);
               router.replace('/auth');
             } catch (err) {

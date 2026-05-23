@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
-import { api } from '@/lib/api';
+import { useAuthStore, PlatformKey } from '@/lib/store';
 
-type Platform = 'tiktok' | 'instagram' | 'youtube' | 'facebook';
+type Platform = PlatformKey;
 
 interface SocialAccount {
   id: string;
@@ -17,7 +17,6 @@ const platformInfo: Record<Platform, { name: string; color: string; icon: string
   tiktok: { name: 'TikTok', color: '#ff0050', icon: '🎵' },
   instagram: { name: 'Instagram', color: '#e1306c', icon: '📸' },
   youtube: { name: 'YouTube', color: '#ff0000', icon: '🎬' },
-  facebook: { name: 'Facebook', color: '#1877f2', icon: '👥' },
 };
 
 export default function SocialAccountsScreen() {
@@ -25,14 +24,27 @@ export default function SocialAccountsScreen() {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<Platform | null>(null);
 
+  const fetchSocialAccounts = useAuthStore((s) => s.fetchSocialAccounts);
+  const startOAuth = useAuthStore((s) => s.startOAuth);
+  const disconnectPlatform = useAuthStore((s) => s.disconnectPlatform);
+
   useEffect(() => {
-    fetchAccounts();
+    loadAccounts();
   }, []);
 
-  const fetchAccounts = async () => {
+  const loadAccounts = async () => {
     try {
-      const data = await api.get<SocialAccount[]>('/social-accounts');
-      setAccounts(data);
+      await fetchSocialAccounts();
+      // pull from store after fetch
+      const stored = useAuthStore.getState().socialAccounts || [];
+      setAccounts(stored.map((a) => ({
+        id: `${a.platform}-${a.handle || 'anon'}`,
+        platform: a.platform as Platform,
+        handle: a.handle || null,
+        follower_count: 0,
+        eligible_for_program: a.connected,
+        connected_at: new Date().toISOString(),
+      })));
     } catch {
       // No accounts yet
     } finally {
@@ -43,14 +55,10 @@ export default function SocialAccountsScreen() {
   const handleConnect = async (platform: Platform) => {
     setConnecting(platform);
     try {
-      const { auth_url } = await api.post<{ auth_url: string }>('/social-accounts/connect', {
-        platform,
-        redirect_uri: 'mvc-app://callback',
-      });
-      // Open auth_url in browser / WebView
+      const { auth_url } = await startOAuth(platform);
       Alert.alert('Connect', `Open this URL to connect ${platformInfo[platform].name}:\n\n${auth_url}`, [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Done', onPress: fetchAccounts },
+        { text: 'Done', onPress: loadAccounts },
       ]);
     } catch (err: any) {
       Alert.alert('Error', err.message || `Could not connect ${platformInfo[platform].name}`);
@@ -70,7 +78,7 @@ export default function SocialAccountsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await api.delete(`/social-accounts/${accountId}`);
+              await disconnectPlatform(platform);
               setAccounts(accounts.filter((a) => a.id !== accountId));
             } catch {
               Alert.alert('Error', 'Could not disconnect account');

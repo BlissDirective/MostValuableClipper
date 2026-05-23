@@ -43,13 +43,13 @@ export default function ApprovalScreen() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    clipsApi.list({ status: "ready_for_review", limit: 20 })
-      .then((res) => {
+    clipsApi.getAll({ status: "ready_for_review", limit: 20 })
+      .then((res: any) => {
         if (cancelled) return;
         const items = (res.data.items || []).map(mapClipToQueueItem);
         setQueue(items);
       })
-      .catch((err) => {
+      .catch((err: any) => {
         console.warn("[approval] fetch failed:", err.message);
       })
       .finally(() => {
@@ -87,7 +87,7 @@ export default function ApprovalScreen() {
 
   const handleRemix = useCallback(async () => {
     if (!current) return;
-    triggerHaptic("light");
+    triggerHaptic("selection");
     try {
       const result = await clipsApi.remix(current.clip.id, {
         num_variants: 3,

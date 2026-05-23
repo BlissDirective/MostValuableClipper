@@ -9,6 +9,7 @@ import {
   View,
   ActivityIndicator,
   RefreshControl,
+  TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -24,8 +25,9 @@ import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
 import { InsightTile } from "@/components/InsightTile";
 import { MetricChip } from "@/components/MetricChip";
+import { useToast } from "@/components/ToastProvider";
 import { useAuthStore } from "@/lib/store";
-import { analyticsApi, type HookArchetype } from "@/lib/api";
+import { analyticsApi, swarmApi, type HookArchetype } from "@/lib/api";
 import { triggerHaptic } from "@/utils/haptics";
 
 interface DashboardData {
@@ -43,30 +45,10 @@ interface DashboardData {
 interface CaptionStyle {
   name: string;
   body: string;
-  delta: string;
+  delta: number;
   variant: "positive" | "negative" | "neutral";
+  sample_size: number;
 }
-
-const CAPTION_STYLES: CaptionStyle[] = [
-  {
-    name: "Short · under 90 chars",
-    body: "Outperforms longer captions by 31% on TikTok, last 30 clips.",
-    delta: "+31%",
-    variant: "positive",
-  },
-  {
-    name: "Numbered list",
-    body: "Steady performance across platforms. No significant lift or drag.",
-    delta: "+3%",
-    variant: "neutral",
-  },
-  {
-    name: "Hashtag-heavy",
-    body: "Underperforms baseline on Instagram Reels by 18% over the period.",
-    delta: "-18%",
-    variant: "negative",
-  },
-];
 
 interface TopSource {
   id: string;
@@ -76,22 +58,29 @@ interface TopSource {
   variant: "positive" | "negative" | "neutral";
 }
 
-const TOP_SOURCES: TopSource[] = [
-  { id: "src-1", name: "Design Details RSS", detail: "Podcast · 14 clips", delta: "+42%", variant: "positive" },
-  { id: "src-2", name: "CC broadcast pool", detail: "Archive · 6 clips", delta: "+11%", variant: "positive" },
-  { id: "src-3", name: "Own stream uploads", detail: "Upload · 9 clips", delta: "-7%", variant: "negative" },
-];
-
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOURS_PER_ROW = 24;
 
-/** Deterministic heatmap intensity 0..1 keyed to (day, hour). */
-function heatIntensity(day: number, hour: number): number {
+/** Heatmap intensity 0..1 keyed to (day, hour). Uses real daily stats when available. */
+function heatIntensity(day: number, hour: number, dailyStats?: any[]): number {
+  // If real daily stats exist, weight by actual posting volume for that day of week
+  let dayWeight = day >= 5 ? 0.65 : 0.5;
+  if (dailyStats && dailyStats.length > 0) {
+    const dayStats = dailyStats.filter((s: any) => {
+      const d = new Date(s.date);
+      return d.getDay() === day;
+    });
+    if (dayStats.length > 0) {
+      const avgClips = dayStats.reduce((sum: number, s: any) => sum + (s.clips_posted || 0), 0) / dayStats.length;
+      const maxClips = Math.max(...dailyStats.map((s: any) => s.clips_posted || 0), 1);
+      dayWeight = 0.3 + (avgClips / maxClips) * 0.7;
+    }
+  }
+
   const evening = Math.max(0, 1 - Math.abs(hour - 19) / 6);
-  const weekendBoost = day >= 5 ? 0.15 : 0;
   const noiseSeed = (day * 31 + hour * 17) % 11;
   const noise = noiseSeed / 22;
-  const raw = evening * 0.85 + weekendBoost + noise;
+  const raw = evening * 0.85 + (day >= 5 ? 0.15 : 0) * dayWeight + noise;
   return Math.max(0.04, Math.min(1, raw));
 }
 
@@ -121,18 +110,23 @@ export default function InsightsScreen() {
   const [hookInsights, setHookInsights] = useState<string[]>([]);
   const [criticCard, setCriticCard] = useState<string>("");
   const [clipsAnalyzed, setClipsAnalyzed] = useState<number>(0);
+  const [captionStyles, setCaptionStyles] = useState<CaptionStyle[]>([]);
+  const [captionStylesAnalyzed, setCaptionStylesAnalyzed] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { show: showToast } = useToast();
 
   const loadData = async () => {
     try {
       setError(null);
       
-      // Fetch dashboard and hook analysis in parallel
-      const [dashboardRes, hooksRes] = await Promise.all([
+      // Fetch dashboard, hook analysis, and caption styles in parallel
+      const [dashboardRes, hooksRes, captionRes] = await Promise.all([
         analyticsApi.getDashboard(),
         analyticsApi.getHookAnalysis(),
+        analyticsApi.getCaptionStyles().catch(() => null),
       ]);
       
       setData(dashboardRes);
@@ -140,6 +134,18 @@ export default function InsightsScreen() {
       setHookInsights(hooksRes.insights || []);
       setCriticCard(hooksRes.critic_card || "");
       setClipsAnalyzed(hooksRes.total_clips_analyzed || 0);
+      
+      if (captionRes) {
+        const mappedStyles: CaptionStyle[] = (captionRes.styles || []).map((s: any) => ({
+          name: s.name,
+          body: s.body,
+          delta: s.delta_pct ?? s.delta ?? 0,
+          variant: (s.variant as "positive" | "negative" | "neutral") || "neutral",
+          sample_size: s.sample_size ?? 0,
+        }));
+        setCaptionStyles(mappedStyles);
+        setCaptionStylesAnalyzed(captionRes.total_clips_analyzed || 0);
+      }
     } catch (err: any) {
       setError(err.detail || "Failed to load insights");
     } finally {
@@ -167,8 +173,8 @@ export default function InsightsScreen() {
   }, [selectedPipelineIds, pipelines]);
 
   // Compute top sources from real data
-  const topSources = useMemo(() => {
-    if (!data?.platform_breakdown) return TOP_SOURCES;
+  const topSources: any[] = useMemo(() => {
+    if (!data?.platform_breakdown) return [];
     
     return Object.entries(data.platform_breakdown)
       .map(([platform, count], idx) => ({
@@ -278,16 +284,16 @@ export default function InsightsScreen() {
           contentContainerStyle={styles.hookList}
         >
           {hooks.length > 0 ? (
-            hooks.map((h) => (
-              <View key={h.pattern_type} style={styles.hookCardWrap}>
+            hooks.map((h, i) => (
+              <View key={h.name} style={styles.hookCardWrap}>
                 <View style={styles.rankBadge}>
-                  <Text style={styles.rankText}>#{h.rank}</Text>
+                  <Text style={styles.rankText}>#{`${i + 1}`}</Text>
                 </View>
                 <InsightTile
-                  overline={`${h.archetype_name} · ${h.clip_count} clips`}
-                  headline={h.retention_delta_pct > 0 ? `+${h.retention_delta_pct.toFixed(0)}%` : `${h.retention_delta_pct.toFixed(0)}%`}
+                  overline={`${h.name} · ${h.usage_count} clips`}
+                  headline={h.avg_retention > 0 ? `+${h.avg_retention.toFixed(0)}%` : `${h.avg_retention.toFixed(0)}%`}
                   body={`${h.description} vs. period average.`}
-                  variant={h.variant}
+                  variant={h.avg_retention > 0 ? "positive" : "negative"}
                   style={styles.hookCard}
                 />
               </View>
@@ -313,7 +319,15 @@ export default function InsightsScreen() {
         <View style={styles.swarmGrid}>
           <TouchableOpacity 
             style={[styles.swarmBtn, { backgroundColor: '#ec489920', borderColor: '#ec489940' }]}
-            onPress={() => Alert.alert("Hooks Analysis", "This will run multiple hook analysis agents in parallel.\n\nRequires: A clip with history data.\n\nAgents: recent_7d, recent_30d, all_time, per_platform, by_archetype")}
+            onPress={async () => {
+              triggerHaptic("blockTriggered");
+              try {
+                const res = await swarmApi.runHooksAnalysis("latest", "tiktok");
+                showToast({ type: "success", message: "Hooks Analysis Complete" });
+              } catch (err: any) {
+                showToast({ type: "error", message: "Analysis Failed" });
+              }
+            }}
           >
             <BarChart3 size={18} color="#ec4899" />
             <Text style={[styles.swarmBtnLabel, { color: '#ec4899' }]}>Hooks Analysis</Text>
@@ -321,7 +335,15 @@ export default function InsightsScreen() {
           </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.swarmBtn, { backgroundColor: '#f9731620', borderColor: '#f9731640' }]}
-            onPress={() => Alert.alert("A/B Test", "This will run multiple A/B test comparison strategies in parallel.\n\nRequires: A clip with variant data.\n\nAgents: engagement_winner, retention_winner, composite_winner, views_winner, watch_time_winner")}
+            onPress={async () => {
+              triggerHaptic("blockTriggered");
+              try {
+                const res = await swarmApi.runABTest("latest", "variant-b");
+                showToast({ type: "success", message: "A/B Test Complete" });
+              } catch (err: any) {
+                showToast({ type: "error", message: "A/B Test Failed" });
+              }
+            }}
           >
             <Activity size={18} color="#f97316" />
             <Text style={[styles.swarmBtnLabel, { color: '#f97316' }]}>A/B Test</Text>
@@ -374,7 +396,7 @@ export default function InsightsScreen() {
               <Text style={styles.dayLabel}>{d}</Text>
               <View style={styles.heatCells}>
                 {Array.from({ length: HOURS_PER_ROW }).map((_, hourIdx) => {
-                  const intensity = heatIntensity(dayIdx, hourIdx);
+                  const intensity = heatIntensity(dayIdx, hourIdx, data?.daily_stats);
                   return (
                     <View
                       key={hourIdx}
@@ -396,18 +418,33 @@ export default function InsightsScreen() {
           </View>
         </View>
 
-        {/* Caption styles */}
-        <SectionHeader title="Caption styles" subtitle="Ranked by retention delta vs. period baseline." />
+        {/* Caption styles — real data from backend */}
+        <SectionHeader 
+          title="Caption styles" 
+          subtitle={captionStylesAnalyzed > 0 
+            ? `Ranked by retention delta vs. period baseline · ${captionStylesAnalyzed} clips analyzed.`
+            : "Ranked by retention delta vs. period baseline."
+          } 
+        />
         <View style={styles.captionList}>
-          {CAPTION_STYLES.map((c) => (
+          {captionStyles.length > 0 ? (
+            captionStyles.map((c) => (
+              <InsightTile
+                key={c.name}
+                overline={c.name}
+                headline={`${c.delta > 0 ? '+' : ''}${c.delta}%`}
+                body={c.body}
+                variant={c.variant}
+              />
+            ))
+          ) : (
             <InsightTile
-              key={c.name}
-              overline={c.name}
-              headline={c.delta}
-              body={c.body}
-              variant={c.variant}
+              overline="Caption Analysis"
+              headline="---"
+              body="Post clips with captions to unlock AI-powered caption style analysis."
+              variant="neutral"
             />
-          ))}
+          )}
         </View>
 
         {/* Top sources — now from real data */}

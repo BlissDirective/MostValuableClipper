@@ -22,6 +22,7 @@ import {
   Share2,
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Video, ResizeMode } from "expo-av";
 
 import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
@@ -41,22 +42,18 @@ interface DetailData {
   sourceUrl: string;
   caption: string;
   platforms: { platform: Platform; handle: string; views: string; watchTime: string; earnings: string }[];
-  safety?: { variant: SafetyVariant; categories: string[]; reasoning: string; actionTaken: string } | null;
+  safety?: { variant: SafetyVariant; categories: string[]; reasoning: string; actionTaken: string; } | null;
+  videoUrl?: string;
+  hasMetrics?: boolean;
+  views?: number;
+  likes?: number;
+  shares?: number;
+  comments?: number;
+  watchTimeSeconds?: number;
+  retentionPct?: number;
+  earningsCents?: number;
+  metricsSyncedAt?: string;
 }
-
-const PLACEHOLDER: DetailData = {
-  id: "clip-1",
-  sourceName: "Design Details · Ep 412",
-  sourceUrl: "designdetails.fm/412 · 14:22–14:58",
-  caption:
-    "The hidden cost of skeuomorphism in modern productivity apps and why nobody talks about it. Three examples, one fix.",
-  platforms: [
-    { platform: "tiktok", handle: "@studio", views: "12.4K", watchTime: "0:21 avg", earnings: "$1.80" },
-    { platform: "instagram", handle: "@studio", views: "8.2K", watchTime: "0:18 avg", earnings: "$0.90" },
-    { platform: "youtube", handle: "@studio", views: "3.5K", watchTime: "0:34 avg", earnings: "$0.70" },
-  ],
-  safety: null,
-};
 
 export default function ClipDetailScreen() {
   const router = useRouter();
@@ -64,6 +61,9 @@ export default function ClipDetailScreen() {
   const [clipData, setClipData] = useState<Clip | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const doSignOut = useAuthStore((s) => s.doSignOut);
+
+  // Video player state
+  const [videoStatus, setVideoStatus] = useState<{ isPlaying: boolean }>({ isPlaying: false });
 
   // Swarm action sheet + config modal state
   const [swarmSheetOpen, setSwarmSheetOpen] = useState(false);
@@ -133,6 +133,27 @@ export default function ClipDetailScreen() {
     return () => { cancelled = true; };
   }, [params.id]);
 
+  // Number formatting helpers
+  const formatNumber = useCallback((n?: number): string => {
+    if (n === undefined || n === null) return "—";
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return String(n);
+  }, []);
+
+  const formatDuration = useCallback((seconds?: number): string => {
+    if (!seconds) return "—";
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return `${m}m ${s}s`;
+  }, []);
+
+  const formatCurrency = useCallback((cents?: number): string => {
+    if (cents === undefined || cents === null) return "—";
+    return `$${(cents / 100).toFixed(2)}`;
+  }, []);
+
   // Map backend Clip to DetailData for rendering
   const clip = useMemo<DetailData>(() => {
     if (clipData) {
@@ -144,17 +165,76 @@ export default function ClipDetailScreen() {
             actionTaken: "Review before posting.",
           }
         : null;
+
+      // Build platform rows from platform_metrics or platform_posts
+      const platforms: DetailData["platforms"] = [];
+      const pm = clipData.platform_metrics || {};
+      const pp = clipData.platform_posts || {};
+
+      for (const [platform, metrics] of Object.entries(pm)) {
+        const post = pp[platform] || {};
+        const views = (metrics as any)?.views ?? 0;
+        const watchTime = clipData.watch_time_seconds
+          ? formatDuration((clipData.watch_time_seconds * (views / (clipData.views || 1))))
+          : "—";
+        const earnings = clipData.earnings_cents
+          ? formatCurrency(Math.round((clipData.earnings_cents * (views / (clipData.views || 1)))))
+          : "—";
+
+        platforms.push({
+          platform: platform as Platform,
+          handle: post.handle || post.post_id || platform,
+          views: formatNumber(views),
+          watchTime,
+          earnings,
+        });
+      }
+
+      // Also include posted platforms without metrics yet
+      for (const [platform, post] of Object.entries(pp)) {
+        if (!pm[platform]) {
+          platforms.push({
+            platform: platform as Platform,
+            handle: (post as any)?.handle || (post as any)?.post_id || platform,
+            views: "—",
+            watchTime: "—",
+            earnings: "—",
+          });
+        }
+      }
+
+      const hasMetrics = !!clipData.metrics_synced_at && (clipData.views !== undefined || clipData.views !== null);
+
       return {
         id: clipData.id,
         sourceName: clipData.title || "Untitled clip",
         sourceUrl: clipData.video_url || `Clip · ${clipData.id.slice(0, 8)}`,
         caption: clipData.caption || "No caption provided.",
-        platforms: [],
+        platforms,
         safety,
+        videoUrl: clipData.video_url,
+        hasMetrics,
+        views: clipData.views,
+        likes: clipData.likes,
+        shares: clipData.shares,
+        comments: clipData.comments,
+        watchTimeSeconds: clipData.watch_time_seconds,
+        retentionPct: clipData.retention_pct,
+        earningsCents: clipData.earnings_cents,
+        metricsSyncedAt: clipData.metrics_synced_at,
       };
     }
-    return { ...PLACEHOLDER, id: params.id ?? PLACEHOLDER.id };
-  }, [clipData, params.id]);
+    return {
+      id: params.id ?? "clip-1",
+      sourceName: "Untitled clip",
+      sourceUrl: `Clip · ${(params.id ?? "").slice(0, 8)}`,
+      caption: "No caption provided.",
+      platforms: [],
+      safety: null,
+      videoUrl: undefined,
+      hasMetrics: false,
+    };
+  }, [clipData, params.id, formatNumber, formatDuration, formatCurrency]);
 
   const handleAction = useCallback(
     async (action: string) => {
@@ -180,7 +260,7 @@ export default function ClipDetailScreen() {
         );
       } else if (action === "download") {
         try {
-          triggerHaptic("heavy");
+          triggerHaptic("blockTriggered");
           const result = await clipsApi.downloadUrl(clip.id);
           if (result?.url) {
             const supported = await Linking.canOpenURL(result.url);
@@ -210,7 +290,7 @@ export default function ClipDetailScreen() {
               text: "Remix",
               onPress: async () => {
                 try {
-                  triggerHaptic("heavy");
+                  triggerHaptic("blockTriggered");
                   const result = await clipsApi.remix(clip.id, {
                     num_variants: 3,
                     target_duration: 20,
@@ -250,7 +330,7 @@ export default function ClipDetailScreen() {
   const handleSwarmQuickRun = useCallback(
     async (poolType: SwarmPoolType) => {
       try {
-        triggerHaptic("heavy");
+        triggerHaptic("blockTriggered");
         let result;
         switch (poolType) {
           case "hook":
@@ -306,7 +386,7 @@ export default function ClipDetailScreen() {
   const handleSwarmExecute = useCallback(
     async (config: SwarmExecutionConfig) => {
       try {
-        triggerHaptic("heavy");
+        triggerHaptic("blockTriggered");
         const poolType = config.poolType;
         let result;
 
@@ -371,11 +451,30 @@ export default function ClipDetailScreen() {
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <View style={styles.thumb}>
-            <Film
-              size={tokens.icon.size.xl * 1.5}
-              color={tokens.color.text.tertiary}
-              strokeWidth={tokens.icon.stroke.thin}
-            />
+            {clip.videoUrl ? (
+              <Video
+                source={{ uri: clip.videoUrl }}
+                style={styles.videoPlayer}
+                resizeMode={ResizeMode.CONTAIN}
+                useNativeControls
+                isLooping
+                onPlaybackStatusUpdate={(status) => {
+                  if (status.isLoaded) {
+                    setVideoStatus({ isPlaying: status.isPlaying });
+                  }
+                }}
+                accessibilityLabel="Clip preview video"
+              />
+            ) : (
+              <>
+                <Film
+                  size={tokens.icon.size.xl * 1.5}
+                  color={tokens.color.text.tertiary}
+                  strokeWidth={tokens.icon.stroke.thin}
+                />
+                <Text style={styles.noVideoText}>No preview available</Text>
+              </>
+            )}
             <SafeAreaView edges={["top"]} style={styles.thumbOverlay} pointerEvents="box-none">
               <Pressable
                 onPress={() => router.back()}
@@ -416,31 +515,42 @@ export default function ClipDetailScreen() {
               </View>
             ) : null}
 
-            <View style={styles.platformBlock}>
-              <Text style={styles.overline}>PER PLATFORM</Text>
-              <View style={styles.platformHeader}>
-                <Text style={[styles.colLabel, styles.colPlatform]}>Platform</Text>
-                <Text style={[styles.colLabel, styles.colMetric]}>Views</Text>
-                <Text style={[styles.colLabel, styles.colMetric]}>Watch</Text>
-                <Text style={[styles.colLabel, styles.colMetric]}>Earnings</Text>
-              </View>
-              {clip.platforms.map((p) => (
-                <View key={p.platform} style={styles.platformRow}>
-                  <View style={styles.colPlatform}>
-                    <AccountBadge platform={p.platform} handle={p.handle} variant="pill" />
-                  </View>
-                  <Text style={[styles.colValue, styles.colMetric]}>{p.views}</Text>
-                  <Text style={[styles.colValue, styles.colMetric]}>{p.watchTime}</Text>
-                  <Text style={[styles.colValue, styles.colMetric]}>{p.earnings}</Text>
+            {clip.platforms.length > 0 || clip.hasMetrics ? (
+              <View style={styles.platformBlock}>
+                <Text style={styles.overline}>PER PLATFORM</Text>
+                <View style={styles.platformHeader}>
+                  <Text style={[styles.colLabel, styles.colPlatform]}>Platform</Text>
+                  <Text style={[styles.colLabel, styles.colMetric]}>Views</Text>
+                  <Text style={[styles.colLabel, styles.colMetric]}>Watch</Text>
+                  <Text style={[styles.colLabel, styles.colMetric]}>Earnings</Text>
                 </View>
-              ))}
-            </View>
+                {clip.platforms.map((p) => (
+                  <View key={p.platform} style={styles.platformRow}>
+                    <View style={styles.colPlatform}>
+                      <AccountBadge platform={p.platform} handle={p.handle} variant="pill" />
+                    </View>
+                    <Text style={[styles.colValue, styles.colMetric]}>{p.views}</Text>
+                    <Text style={[styles.colValue, styles.colMetric]}>{p.watchTime}</Text>
+                    <Text style={[styles.colValue, styles.colMetric]}>{p.earnings}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.platformBlockEmpty}>
+                <Text style={styles.overline}>PER PLATFORM</Text>
+                <Text style={styles.emptyStateText}>
+                  Post this clip to see platform metrics here. Connect your social accounts and tap "Post" to get started.
+                </Text>
+              </View>
+            )}
 
-            <View style={styles.metricsBlock}>
-              <MetricChip label="Total views" value="24.1K" variant="positive" delta="+18%" style={styles.flex1} />
-              <MetricChip label="Retention" value="62%" variant="positive" style={styles.flex1} />
-              <MetricChip label="Earnings" value="$3.40" style={styles.flex1} />
-            </View>
+            {clip.hasMetrics ? (
+              <View style={styles.metricsBlock}>
+                <MetricChip label="Total views" value={formatNumber(clip.views)} variant="positive" style={styles.flex1} />
+                <MetricChip label="Retention" value={clip.retentionPct ? `${Math.round(clip.retentionPct * 100)}%` : "—"} variant="positive" style={styles.flex1} />
+                <MetricChip label="Earnings" value={formatCurrency(clip.earningsCents)} style={styles.flex1} />
+              </View>
+            ) : null}
 
             <View style={styles.attribution}>
               <Text style={styles.overline}>ATTRIBUTION</Text>
@@ -557,6 +667,17 @@ const styles = StyleSheet.create({
     backgroundColor: tokens.color.bg.surface,
     position: "relative",
   },
+  videoPlayer: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: tokens.color.bg.base,
+  },
+  noVideoText: {
+    marginTop: tokens.spacing.sm,
+    fontFamily: tokens.type.scale.caption.family,
+    fontSize: tokens.type.scale.caption.size,
+    color: tokens.color.text.tertiary,
+  },
   thumbOverlay: {
     position: "absolute",
     top: 0,
@@ -621,6 +742,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: tokens.color.border.subtle,
     padding: tokens.spacing.md,
+  },
+  platformBlockEmpty: {
+    backgroundColor: tokens.color.bg.surface,
+    borderRadius: tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: tokens.color.border.subtle,
+    padding: tokens.spacing.md,
+    gap: tokens.spacing.sm,
+  },
+  emptyStateText: {
+    fontFamily: tokens.type.scale.bodySmall.family,
+    fontSize: tokens.type.scale.bodySmall.size,
+    lineHeight: tokens.type.scale.bodySmall.lineHeight,
+    color: tokens.color.text.secondary,
   },
   platformHeader: {
     flexDirection: "row",

@@ -4,10 +4,12 @@ from typing import List, Optional
 from app.models import Source, SourceCreate
 from app.services.auth import get_current_user
 from app.services.database import SupabaseService
+from app.services.queue import QueueService
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
 db = SupabaseService()
+queue = QueueService()
 
 @router.get("")
 async def list_sources(

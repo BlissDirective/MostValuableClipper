@@ -888,6 +888,11 @@ class SafetySwarmAgent:
             )
 
 
+
+from datetime import datetime, timedelta
+
+from app.services.database import supabase
+
 class HooksAnalysisSwarmAgent:
     """Analyze hooks with a specific time period and method."""
 

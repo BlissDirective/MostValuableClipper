@@ -42,7 +42,7 @@ const OPTIONS: OptionConfig[] = [
 ];
 
 export default function AutonomyScreen() {
-  const autonomy = useAuthStore((s) => s.draft.autonomy);
+  const autonomy = useAuthStore((s) => (s.draft as any).autonomy);
   const setAutonomy = useAuthStore((s) => s.setAutonomy);
 
   const select = (mode: AutonomyMode) => {

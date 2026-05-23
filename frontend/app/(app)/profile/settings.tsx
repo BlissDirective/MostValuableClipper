@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Modal,
@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ChevronLeft, Lock, ShieldCheck, Download } from "lucide-react-native";
+import { ChevronLeft, Lock, ShieldCheck, Download, Moon, Sun, Monitor } from "lucide-react-native";
 
 import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
@@ -26,6 +26,8 @@ import {
 } from "@/lib/store";
 import { usersApi } from "@/lib/api";
 import { triggerHaptic } from "@/utils/haptics";
+import { useTheme } from "@/components/ThemeProvider";
+
 
 const RETENTION_OPTIONS: { key: RetentionPolicy; label: string; body: string }[] = [
   { key: "aggressive", label: "Aggressive · 30 days", body: "Source media deleted after 30 days." },
@@ -60,12 +62,9 @@ const WARNING_LABELS: Record<WarningCategoryKey, { title: string; body: string }
   },
 };
 
-const CLIPS_USED = 23;
-const CLIPS_QUOTA = 50;
-
 export default function SettingsScreen() {
   const router = useRouter();
-  const cohortOptIn = useAuthStore((s) => s.draft.cohortOptIn);
+  const cohortOptIn = useAuthStore((s) => (s.draft as any).cohortOptIn);
   const setCohortOptIn = useAuthStore((s) => s.setCohortOptIn);
 
   const [retention, setRetention] = useState<RetentionPolicy>("moderate");
@@ -80,6 +79,32 @@ export default function SettingsScreen() {
   const [passwordLoading, setPasswordLoading] = useState<boolean>(false);
   const [exportLoading, setExportLoading] = useState<boolean>(false);
 
+  const [usage, setUsage] = useState<{ clips_used: number; clips_quota: number; tier: string } | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    setUsageLoading(true);
+    usersApi.getUsage()
+      .then((data) => {
+        if (mounted) setUsage(data);
+      })
+      .catch((err) => {
+        console.warn("[settings] usage fetch failed:", err.message);
+      })
+      .finally(() => {
+        if (mounted) setUsageLoading(false);
+      });
+    return () => { mounted = false; };
+  }, []);
+
+  const clipsUsed = usage?.clips_used ?? 0;
+  const clipsQuota = usage?.clips_quota ?? 10;
+  const tierLabel = usage?.tier ?? "free";
+  const clipsPct = clipsQuota > 0 ? Math.min(1, clipsUsed / clipsQuota) : 0;
+
+  const { mode, setMode, resolvedMode } = useTheme();
+
   const onCohortToggle = useCallback(
     (v: boolean) => {
       triggerHaptic("selection");
@@ -87,6 +112,11 @@ export default function SettingsScreen() {
     },
     [setCohortOptIn]
   );
+
+  const onThemeChange = useCallback((newMode: "dark" | "light" | "system") => {
+    triggerHaptic("selection");
+    setMode(newMode);
+  }, [setMode]);
 
   const onResetLearned = useCallback(() => {
     Alert.alert(
@@ -144,8 +174,6 @@ export default function SettingsScreen() {
     setExportLoading(true);
     try {
       const data = await usersApi.exportData();
-      // On mobile, we can't easily download JSON files.
-      // Show a summary and offer to share or copy.
       const summary = `Export ready:\n• ${(data.pipelines as any[])?.length || 0} pipelines\n• ${(data.clips as any[])?.length || 0} clips\n• ${(data.sources as any[])?.length || 0} sources\n\nData export has been prepared on the server. Full download available via web dashboard.`;
       Alert.alert("Data Export", summary);
     } catch (err: any) {
@@ -159,13 +187,12 @@ export default function SettingsScreen() {
   const onConfirmDelete = useCallback(async () => {
     if (deleteConfirm.trim() !== "DELETE") return;
     try {
-      await usersApi.deleteMe();
+      await usersApi.deleteAccount();
     } catch (err: any) {
       console.warn("[settings] delete failed:", err.message);
     }
     setDeleteModalOpen(false);
     setDeleteConfirm("");
-    // Sign out locally regardless of server result
     const doSignOut = useAuthStore.getState().doSignOut;
     try {
       await doSignOut();
@@ -174,8 +201,6 @@ export default function SettingsScreen() {
     }
     router.replace("/(auth)/welcome");
   }, [deleteConfirm, router]);
-
-  const clipsPct = Math.min(1, CLIPS_USED / CLIPS_QUOTA);
 
   return (
     <View style={styles.root}>
@@ -234,6 +259,42 @@ export default function SettingsScreen() {
               size="md"
               onPress={onResetLearned}
             />
+          </Section>
+
+          <Section title="APPEARANCE">
+            <View style={styles.card}>
+              <View style={styles.toggleRow}>
+                <View style={styles.toggleIcon}>
+                  {resolvedMode === "dark" ? (
+                    <Moon size={tokens.icon.size.md} color={tokens.color.brand.indigo[400]} strokeWidth={tokens.icon.stroke.default} />
+                  ) : (
+                    <Sun size={tokens.icon.size.md} color={tokens.color.brand.teal[400]} strokeWidth={tokens.icon.stroke.default} />
+                  )}
+                </View>
+                <View style={styles.toggleBody}>
+                  <Text style={styles.rowTitle}>Theme</Text>
+                  <Text style={styles.rowBody}>
+                    {mode === "system" ? "Following system" : resolvedMode === "dark" ? "Dark mode" : "Light mode"}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.themeRow}>
+                {(["dark", "light", "system"] as const).map((m) => (
+                  <Pressable
+                    key={m}
+                    style={[styles.themeBtn, mode === m && styles.themeBtnActive]}
+                    onPress={() => onThemeChange(m)}
+                  >
+                    {m === "dark" && <Moon size={14} color={mode === m ? tokens.color.text.onAccent : tokens.color.text.secondary} />}
+                    {m === "light" && <Sun size={14} color={mode === m ? tokens.color.text.onAccent : tokens.color.text.secondary} />}
+                    {m === "system" && <Monitor size={14} color={mode === m ? tokens.color.text.onAccent : tokens.color.text.secondary} />}
+                    <Text style={[styles.themeText, mode === m && styles.themeTextActive]}>
+                      {m.charAt(0).toUpperCase() + m.slice(1)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
           </Section>
 
           <Section title="SOURCE RETENTION DEFAULT">
@@ -315,14 +376,21 @@ export default function SettingsScreen() {
             <View style={styles.card}>
               <View style={styles.quotaRow}>
                 <Text style={styles.rowTitle}>Clips this month</Text>
-                <Text style={styles.quotaValue}>
-                  {CLIPS_USED} / {CLIPS_QUOTA}
-                </Text>
+                {usageLoading ? (
+                  <ActivityIndicator size="small" color={tokens.color.text.tertiary} />
+                ) : (
+                  <Text style={styles.quotaValue}>
+                    {clipsUsed} / {clipsQuota}
+                  </Text>
+                )}
               </View>
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: `${clipsPct * 100}%` }]} />
               </View>
-              <Text style={styles.rowBody}>Basic plan quota. Upgrade for 500 clips / month.</Text>
+              <Text style={styles.rowBody}>
+                {tierLabel.charAt(0).toUpperCase() + tierLabel.slice(1)} plan quota.
+                {tierLabel === "free" ? " Upgrade for more clips per month." : ""}
+              </Text>
             </View>
           </Section>
 
@@ -675,5 +743,35 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     gap: tokens.spacing.sm,
     marginTop: tokens.spacing.md,
+  },
+  themeRow: {
+    flexDirection: "row",
+    gap: tokens.spacing.sm,
+    paddingHorizontal: tokens.spacing.md,
+    paddingBottom: tokens.spacing.md,
+  },
+  themeBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: tokens.spacing.xs,
+    paddingVertical: tokens.spacing.sm,
+    backgroundColor: tokens.color.bg.raised,
+    borderRadius: tokens.radius.md,
+    borderWidth: 1,
+    borderColor: tokens.color.border.subtle,
+  },
+  themeBtnActive: {
+    backgroundColor: tokens.color.brand.indigo[500],
+    borderColor: tokens.color.brand.indigo[500],
+  },
+  themeText: {
+    fontFamily: tokens.type.scale.caption.family,
+    fontSize: tokens.type.scale.caption.size,
+    color: tokens.color.text.secondary,
+  },
+  themeTextActive: {
+    color: tokens.color.text.onAccent,
   },
 });

@@ -21,6 +21,7 @@ import {
   DollarSign,
   Settings,
 } from 'lucide-react-native';
+import { tokens } from '@/constants/tokens';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -285,10 +286,10 @@ export default function SwarmConfigModal({
 }: SwarmConfigModalProps) {
   // Use built-in metadata as defaults
   const meta = STRATEGY_META[poolType];
-  const strategies = (_availableStrategies?.length > 0) ? _availableStrategies : meta.strategies;
-  const labels = (Object.keys(_strategyLabels || {}).length > 0) ? _strategyLabels : meta.labels;
-  const descriptions = (Object.keys(_strategyDescriptions || {}).length > 0) ? _strategyDescriptions : meta.descriptions;
-  const perAgentCost = _costPerAgent > 0 ? _costPerAgent : meta.costPerAgent;
+  const strategies = ((_availableStrategies?.length ?? 0) > 0) ? _availableStrategies! : meta.strategies;
+  const labels = (Object.keys(_strategyLabels || {}).length > 0) ? (_strategyLabels ?? meta.labels) : meta.labels;
+  const descriptions = (Object.keys(_strategyDescriptions || {}).length > 0) ? (_strategyDescriptions ?? meta.descriptions) : meta.descriptions;
+  const perAgentCost = (_costPerAgent ?? 0) > 0 ? _costPerAgent! : meta.costPerAgent;
 
   const [agentCount, setAgentCount] = useState(1);
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);

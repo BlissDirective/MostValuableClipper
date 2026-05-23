@@ -1,5 +1,5 @@
-import React from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useCallback, useState } from "react";
+import { ScrollView, StyleSheet, Text, View, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, router } from "expo-router";
 import { Music2, Youtube, Instagram, LucideIcon, Check } from "lucide-react-native";
@@ -8,6 +8,7 @@ import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
 import { AccountBadge } from "@/components/AccountBadge";
 import { PlatformKey, useAuthStore } from "@/lib/store";
+import { triggerHaptic } from "@/utils/haptics";
 
 interface PlatformRowConfig {
   key: PlatformKey;
@@ -23,11 +24,62 @@ const PLATFORMS: PlatformRowConfig[] = [
 
 export default function ConnectAccountsScreen() {
   const connected = useAuthStore((s) => s.draft.connected);
-  const togglePlatform = useAuthStore((s) => s.togglePlatform);
+  const socialAccounts = useAuthStore((s) => s.socialAccounts);
+  const fetchSocialAccounts = useAuthStore((s) => s.fetchSocialAccounts);
+  const connectPlatform = useAuthStore((s) => s.connectPlatform);
+  const disconnectPlatform = useAuthStore((s) => s.disconnectPlatform);
+  const [connecting, setConnecting] = useState<PlatformKey | null>(null);
 
-  const onConnect = (p: PlatformKey) => {
-    togglePlatform(p);
-  };
+  useEffect(() => {
+    fetchSocialAccounts();
+  }, [fetchSocialAccounts]);
+
+  const getHandleForPlatform = useCallback((platform: PlatformKey) => {
+    const account = socialAccounts.find((a) => a.platform === platform);
+    return account?.handle;
+  }, [socialAccounts]);
+
+  const onConnect = useCallback(async (p: PlatformKey) => {
+    if (connected[p]) {
+      // Disconnect
+      try {
+        triggerHaptic("blockTriggered");
+        await disconnectPlatform(p);
+      } catch (err: any) {
+        Alert.alert("Error", err.message || `Failed to disconnect ${p}.`);
+      }
+      return;
+    }
+
+    // Connect — prompt for handle
+    setConnecting(p);
+    Alert.prompt(
+      `Connect ${p}`,
+      `Enter your ${p} handle (e.g., @username):`,
+      [
+        { text: "Skip", style: "cancel", onPress: () => setConnecting(null) },
+        {
+          text: "Connect",
+          onPress: async (handle?: string) => {
+            if (!handle || handle.trim().length === 0) {
+              setConnecting(null);
+              return;
+            }
+            try {
+              triggerHaptic("blockTriggered");
+              await connectPlatform(p, handle.trim());
+            } catch (err: any) {
+              Alert.alert("Connection Failed", err.message || `Could not connect ${p}.`);
+            } finally {
+              setConnecting(null);
+            }
+          },
+        },
+      ],
+      "plain-text",
+      "",
+    );
+  }, [connected, connectPlatform, disconnectPlatform]);
 
   const goNext = () => router.push("/(auth)/autonomy");
 
@@ -43,6 +95,7 @@ export default function ConnectAccountsScreen() {
           <View style={styles.list}>
             {PLATFORMS.map((p) => {
               const isConnected = connected[p.key];
+              const handle = getHandleForPlatform(p.key);
               const color = tokens.color.semantic.platform[p.key];
               const Icon = p.icon;
               return (
@@ -56,7 +109,7 @@ export default function ConnectAccountsScreen() {
                   </View>
                   {isConnected ? (
                     <View style={styles.connected}>
-                      <AccountBadge platform={p.key} handle={`@analyst.${p.key}`} variant="pill" />
+                      <AccountBadge platform={p.key} handle={handle || "@connected"} variant="pill" />
                     </View>
                   ) : (
                     <ActionButton
@@ -64,6 +117,7 @@ export default function ConnectAccountsScreen() {
                       variant="secondary"
                       size="sm"
                       onPress={() => onConnect(p.key)}
+                      disabled={connecting === p.key}
                     />
                   )}
                   {isConnected ? (

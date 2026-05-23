@@ -5,7 +5,8 @@ import { tokens } from "@/constants/tokens";
 import { triggerHaptic } from "@/utils/haptics";
 import { AccountBadge, Platform } from "./AccountBadge";
 import { MetricChip } from "./MetricChip";
-import { SafetyFlag, SafetyVariant } from "./SafetyFlag";
+import { SafetyFlag } from "./SafetyFlag";
+import type { SafetyVariant } from "./SafetyFlag";
 import { ActionButton } from "./ActionButton";
 
 export type ClipState = "posted" | "queued" | "held-safety-block" | "held-safety-warn" | "processing" | "failed";

@@ -7,6 +7,7 @@ import {
   earningsApi,
   analyticsApi,
   swarmApi,
+  agentsApi,
 } from './api';
 
 // ─── Batch ────────────────────────────────────────────────────────────────────
@@ -281,4 +282,58 @@ export function useAnalytics() {
     queryFn: () => analyticsApi.getDashboard(),
   });
   return { analytics: data ?? null, isLoading };
+}
+
+// ─── Content Discovery ──────────────────────────────────────────────────────
+
+export function useDiscoveryStatus(pipelineId: string | null) {
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['discoveryStatus', pipelineId],
+    queryFn: () => agentsApi.getDiscoveryStatus(pipelineId!),
+    enabled: !!pipelineId,
+    refetchInterval: 10000,
+  });
+  return {
+    proposals: (data as any)?.proposals ?? [],
+    pendingCount: (data as any)?.pending_proposals ?? 0,
+    lastDiscoveryRun: (data as any)?.last_discovery_run ?? null,
+    isLoading,
+    refetch,
+  };
+}
+
+export function useProposalAction() {
+  const qc = useQueryClient();
+  const { mutateAsync: action, isPending } = useMutation({
+    mutationFn: ({ clipId, action }: { clipId: string; action: 'approve' | 'reject' }) =>
+      agentsApi.proposalAction(clipId, action),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['discoveryStatus'] });
+      qc.invalidateQueries({ queryKey: ['clips'] });
+    },
+  });
+  return { action, isPending };
+}
+
+export function useAgentSources(pipelineId: string | null) {
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['agentSources', pipelineId],
+    queryFn: () => agentsApi.getSources(pipelineId!),
+    enabled: !!pipelineId,
+  });
+  return {
+    sources: (data as any)?.sources ?? [],
+    total: (data as any)?.total ?? 0,
+    isLoading,
+    refetch,
+  };
+}
+
+export function useAgentStatus() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['agentStatus'],
+    queryFn: () => agentsApi.getAgentStatus(),
+    refetchInterval: 30000,
+  });
+  return { status: data ?? null, isLoading };
 }

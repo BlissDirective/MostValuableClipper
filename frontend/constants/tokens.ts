@@ -57,6 +57,36 @@ export const tokens = {
         800: "#054944",
         900: "#03332F",
       },
+      green: {
+        50: "#E6F9F0", 100: "#BFF3E0", 200: "#85E6C0", 300: "#4FD4A0",
+        400: "#22BD80", 500: "#0FA360", 600: "#0A844C", 700: "#08663A",
+        800: "#054928", 900: "#03331A",
+      },
+      amber: {
+        50: "#FFF8E6", 100: "#FFEDBF", 200: "#FFDB85", 300: "#FFC94F",
+        400: "#FFB822", 500: "#F5A30F", 600: "#D6840A", 700: "#A86808",
+        800: "#7A4C05", 900: "#523203",
+      },
+      violet: {
+        50: "#F3E6FF", 100: "#E0BFFF", 200: "#C785FF", 300: "#A94FFF",
+        400: "#9122FF", 500: "#7A0FF5", 600: "#610AD6", 700: "#4C08A8",
+        800: "#37057A", 900: "#240352",
+      },
+      pink: {
+        50: "#FFE6F3", 100: "#FFBFE0", 200: "#FF85C7", 300: "#FF4FA9",
+        400: "#FF2291", 500: "#F50F7A", 600: "#D60A61", 700: "#A8084C",
+        800: "#7A0537", 900: "#520324",
+      },
+      red: {
+        50: "#FFE6E6", 100: "#FFBFBF", 200: "#FF8585", 300: "#FF4F4F",
+        400: "#FF2222", 500: "#F50F0F", 600: "#D60A0A", 700: "#A80808",
+        800: "#7A0505", 900: "#520303",
+      },
+      cyan: {
+        50: "#E6FAFF", 100: "#BFF3FF", 200: "#85E6FF", 300: "#4FD4FF",
+        400: "#22BDFF", 500: "#0FA3F5", 600: "#0A84D6", 700: "#0866A8",
+        800: "#05497A", 900: "#033352",
+      },
     },
     accent: {
       primary: "#4256F5",
@@ -77,6 +107,8 @@ export const tokens = {
       infoBg: "#141961",
     },
     semantic: {
+      success: "#1FCB8C",
+      error: "#F25555",
       safety: {
         general: { fg: "#A8B0CC", bg: "#1F2747", border: "#2A3458" },
         warn: { fg: "#F0B438", bg: "#2D2410", border: "#5C4515" },
@@ -145,6 +177,7 @@ export const tokens = {
       body: { size: 16, lineHeight: 24, weight: "400" as const, letterSpacing: 0, family: "Inter_400Regular" },
       bodyMedium: { size: 16, lineHeight: 24, weight: "500" as const, letterSpacing: 0, family: "Inter_500Medium" },
       bodySmall: { size: 14, lineHeight: 20, weight: "400" as const, letterSpacing: 0, family: "Inter_400Regular" },
+      mono: { size: 12, lineHeight: 16, weight: "400" as const, letterSpacing: 0, family: "JetBrains Mono" },
       caption: { size: 12, lineHeight: 16, weight: "500" as const, letterSpacing: 0.2, family: "Inter_500Medium" },
       overline: { size: 11, lineHeight: 16, weight: "600" as const, letterSpacing: 1.0, family: "Inter_600SemiBold" },
     },
@@ -184,15 +217,21 @@ export const tokens = {
     minTouchTarget: 44,
     maxContentWidth: 720,
     feedCardGap: 12,
+    cardRadius: 16,
   },
   haptics: {
     selection: "light" as const,
     approve: "success" as const,
     reject: "warning" as const,
     remixConfirm: "medium" as const,
+    heavy: "medium" as const,
     blockTriggered: "error" as const,
   },
 } as const;
 
 export type Tokens = typeof tokens;
 export default tokens;
+
+
+export const font = tokens.type;
+export const layout = tokens.radius;

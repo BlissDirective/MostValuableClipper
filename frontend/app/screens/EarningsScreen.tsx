@@ -1,20 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
-import { api } from '@/lib/api';
+import { earningsApi } from '@/lib/api';
 
 interface EarningsData {
-  total_revenue_cents: number;
-  total_views: number;
-  by_platform: Array<{
-    platform: string;
-    revenue_cents: number;
-    views: number;
-  }>;
-  history: Array<{
-    period: string;
-    revenue_cents: number;
-    views: number;
-  }>;
+  total_earnings: number;
+  pending_earnings: number;
+  total_clips_monetized: number;
+  by_platform: Record<string, number>;
 }
 
 export default function EarningsScreen() {
@@ -27,7 +19,7 @@ export default function EarningsScreen() {
 
   const fetchEarnings = async () => {
     try {
-      const result = await api.get<EarningsData>('/earnings/summary');
+      const result = await earningsApi.getSummary();
       setData(result);
     } catch {
       // Show empty state
@@ -44,7 +36,8 @@ export default function EarningsScreen() {
     );
   }
 
-  const revenue = (data?.total_revenue_cents || 0) / 100;
+  const revenue = (data?.total_earnings || 0) / 100;
+  const platforms = Object.entries(data?.by_platform || {});
 
   return (
     <ScrollView style={styles.container}>
@@ -53,35 +46,26 @@ export default function EarningsScreen() {
       <View style={styles.totalCard}>
         <Text style={styles.totalLabel}>Total Revenue</Text>
         <Text style={styles.totalAmount}>${revenue.toFixed(2)}</Text>
-        <Text style={styles.totalViews}>{(data?.total_views || 0).toLocaleString()} total views</Text>
+        <Text style={styles.totalViews}>{(data?.total_clips_monetized || 0).toLocaleString()} clips monetized</Text>
+        <Text style={styles.totalViews}>Pending: ${((data?.pending_earnings || 0) / 100).toFixed(2)}</Text>
       </View>
 
       <Text style={styles.sectionTitle}>By Platform</Text>
-      {(data?.by_platform || []).map((item) => (
-        <View key={item.platform} style={styles.platformCard}>
+      {platforms.map(([platform, amount]) => (
+        <View key={platform} style={styles.platformCard}>
           <View style={styles.platformRow}>
-            <Text style={styles.platformName}>{item.platform}</Text>
-            <Text style={styles.platformRevenue}>${(item.revenue_cents / 100).toFixed(2)}</Text>
+            <Text style={styles.platformName}>{platform}</Text>
+            <Text style={styles.platformRevenue}>${(amount / 100).toFixed(2)}</Text>
           </View>
-          <Text style={styles.platformViews}>{item.views.toLocaleString()} views</Text>
         </View>
       ))}
 
-      {!data?.by_platform?.length && (
+      {!platforms.length && (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyText}>No earnings yet</Text>
           <Text style={styles.emptySub}>Connect platforms and post clips to start earning</Text>
         </View>
       )}
-
-      <Text style={styles.sectionTitle}>Recent History</Text>
-      {(data?.history || []).slice(0, 10).map((item, i) => (
-        <View key={i} style={styles.historyRow}>
-          <Text style={styles.historyPeriod}>{item.period}</Text>
-          <Text style={styles.historyAmount}>${(item.revenue_cents / 100).toFixed(2)}</Text>
-          <Text style={styles.historyViews}>{item.views.toLocaleString()} views</Text>
-        </View>
-      ))}
     </ScrollView>
   );
 }
@@ -157,11 +141,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#22c55e',
   },
-  platformViews: {
-    fontSize: 13,
-    color: '#888',
-    marginTop: 4,
-  },
   emptyCard: {
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
@@ -178,28 +157,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     textAlign: 'center',
-  },
-  historyRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
-  },
-  historyPeriod: {
-    color: '#888',
-    fontSize: 14,
-    flex: 1,
-  },
-  historyAmount: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-    marginRight: 12,
-  },
-  historyViews: {
-    color: '#666',
-    fontSize: 13,
   },
 });

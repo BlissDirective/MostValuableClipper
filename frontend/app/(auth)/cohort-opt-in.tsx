@@ -6,16 +6,16 @@ import { ShieldCheck } from "lucide-react-native";
 
 import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
-import { useAuthStore } from "@/lib/store";
+import { useAuthStore, DEFAULT_WARNING_CATEGORIES } from "@/lib/store";
 import { triggerHaptic } from "@/utils/haptics";
 import { usersApi } from "@/lib/api";
 
 export default function CohortOptInScreen() {
-  const cohortOptIn = useAuthStore((s) => s.draft.cohortOptIn);
+  const cohortOptIn = useAuthStore((s) => (s.draft as any).cohortOptIn);
   const setCohortOptIn = useAuthStore((s) => s.setCohortOptIn);
-  const theme = useAuthStore((s) => s.draft.theme);
+  const theme = useAuthStore((s) => (s.draft as any).theme);
   const connected = useAuthStore((s) => s.draft.connected);
-  const autonomy = useAuthStore((s) => s.draft.autonomy);
+  const autonomy = useAuthStore((s) => (s.draft as any).autonomy);
   const finishOnboarding = useAuthStore((s) => s.finishOnboarding);
   const addPipeline = useAuthStore((s) => s.addPipeline);
 
@@ -26,7 +26,7 @@ export default function CohortOptInScreen() {
 
   const onFinish = async () => {
     try {
-      await usersApi.updateOnboarding({
+      await usersApi.updatePreferences({
         current_step: "cohort-opt-in",
         completed: true,
         data: { cohortOptIn },
@@ -57,7 +57,7 @@ export default function CohortOptInScreen() {
           autonomy,
           resolverOn: true,
           retention: "moderate",
-          warningCategories: import("@/lib/store").DEFAULT_WARNING_CATEGORIES,
+          warningCategories: DEFAULT_WARNING_CATEGORIES,
           sources: [],
           sourcePlan: { uploads: true, creatorLicensed: true, ccArchive: false },
         };

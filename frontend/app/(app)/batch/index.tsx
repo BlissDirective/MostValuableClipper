@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,10 +16,13 @@ import {
   AlertCircle,
   Layers,
   ChevronRight,
+  Activity,
+  Zap,
 } from 'lucide-react-native';
 
 import { tokens } from '@/constants/tokens';
 import { useBatchJobs } from '@/lib/api-hooks';
+import { workerApi } from '@/lib/api';
 
 const STATUS_ICON: Record<string, any> = {
   queued: Clock,
@@ -32,8 +35,8 @@ const STATUS_ICON: Record<string, any> = {
 const STATUS_COLOR: Record<string, string> = {
   queued: tokens.color.text.secondary,
   running: tokens.color.brand.indigo[400],
-  completed: tokens.color.semantic.success,
-  failed: tokens.color.semantic.error,
+  completed: tokens.color.status.success,
+  failed: tokens.color.status.danger,
   cancelled: tokens.color.text.tertiary,
 };
 
@@ -53,6 +56,39 @@ const POOL_LABEL: Record<string, string> = {
 export default function BatchJobsScreen() {
   const router = useRouter();
   const { jobs, isLoading, refetch } = useBatchJobs(50);
+  const [workerStatus, setWorkerStatus] = useState<any>(null);
+  const [workerLoading, setWorkerLoading] = useState(false);
+
+  const fetchWorkerStatus = useCallback(async () => {
+    try {
+      const data = await workerApi.status();
+      setWorkerStatus(data.worker);
+    } catch {
+      setWorkerStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWorkerStatus();
+    const interval = setInterval(fetchWorkerStatus, 10000);
+    return () => clearInterval(interval);
+  }, [fetchWorkerStatus]);
+
+  const handleWorkerToggle = useCallback(async () => {
+    setWorkerLoading(true);
+    try {
+      if (workerStatus?.running) {
+        await workerApi.stop();
+      } else {
+        await workerApi.start();
+      }
+      await fetchWorkerStatus();
+    } catch (err: any) {
+      console.warn('[batch] worker toggle failed:', err.message);
+    } finally {
+      setWorkerLoading(false);
+    }
+  }, [workerStatus, fetchWorkerStatus]);
 
   const renderItem = useCallback(
     ({ item }: { item: any }) => {
@@ -99,9 +135,9 @@ export default function BatchJobsScreen() {
                     width: `${progress}%`,
                     backgroundColor:
                       item.status === 'failed'
-                        ? tokens.color.semantic.error
+                        ? tokens.color.status.danger
                         : item.status === 'completed'
-                        ? tokens.color.semantic.success
+                        ? tokens.color.status.success
                         : tokens.color.brand.indigo[400],
                   },
                 ]}
@@ -139,6 +175,33 @@ export default function BatchJobsScreen() {
         <Text style={styles.subtitle}>
           {jobs.length} job{jobs.length !== 1 ? 's' : ''}
         </Text>
+
+        {/* Worker Status */}
+        <TouchableOpacity
+          style={styles.workerBar}
+          onPress={handleWorkerToggle}
+          disabled={workerLoading}
+          activeOpacity={0.7}
+        >
+          <View style={styles.workerRow}>
+            {workerStatus?.running ? (
+              <Zap size={16} color={tokens.color.status.success} strokeWidth={2} />
+            ) : (
+              <Activity size={16} color={tokens.color.text.tertiary} strokeWidth={2} />
+            )}
+            <Text style={styles.workerLabel}>
+              Worker: {workerStatus?.running ? 'Running' : 'Stopped'}
+            </Text>
+            <Text style={styles.workerQueue}>
+              Queue: {workerStatus?.queue_length ?? 0}
+            </Text>
+            {workerStatus?.current_job ? (
+              <Text style={styles.workerJob} numberOfLines={1}>
+                {workerStatus.current_job.slice(0, 12)}...
+              </Text>
+            ) : null}
+          </View>
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -189,13 +252,43 @@ const styles = StyleSheet.create({
     color: tokens.color.text.secondary,
     marginTop: 4,
   },
+  workerBar: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: tokens.color.bg.surface,
+    borderRadius: tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: tokens.color.border.subtle,
+  },
+  workerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  workerLabel: {
+    fontFamily: tokens.type.scale.bodySmall.family,
+    fontSize: tokens.type.scale.bodySmall.size,
+    color: tokens.color.text.primary,
+    flex: 1,
+  },
+  workerQueue: {
+    fontFamily: tokens.type.scale.caption.family,
+    fontSize: tokens.type.scale.caption.size,
+    color: tokens.color.text.secondary,
+  },
+  workerJob: {
+    fontFamily: tokens.type.scale.mono.family,
+    fontSize: 10,
+    color: tokens.color.text.tertiary,
+    maxWidth: 80,
+  },
   list: {
     padding: tokens.layout.screenPadding,
     gap: 12,
   },
   card: {
     backgroundColor: tokens.color.bg.raised,
-    borderRadius: tokens.layout.cardRadius,
+    borderRadius: tokens.radius.lg,
     padding: 16,
     borderWidth: 1,
     borderColor: tokens.color.border.subtle,

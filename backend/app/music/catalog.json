@@ -1,0 +1,10 @@
+{
+  "tracks": [],
+  "genres": [],
+  "vibes": [],
+  "moods": [],
+  "sources": {},
+  "total_tracks": 0,
+  "generated_at": "",
+  "note": "Run scripts/download_music_library.py to populate tracks, then scripts/rebalance_moods.py to distribute moods."
+}

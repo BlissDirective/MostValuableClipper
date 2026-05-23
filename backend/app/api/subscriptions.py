@@ -6,9 +6,12 @@ from app.services.auth import get_current_user
 from app.services.stripe_service import StripeService
 from app.core.config import settings
 
+from app.services.database import SupabaseService
+
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
 stripe_service = StripeService()
+db = SupabaseService()
 
 TIER_PRICE_MAP = {
     "basic": settings.STRIPE_PRICE_BASIC,
@@ -73,6 +76,33 @@ async def create_portal(user=Depends(get_current_user)):
 @router.post("/cancel")
 async def cancel_subscription(user=Depends(get_current_user)):
     """Cancel the current subscription at period end."""
-    # In production: look up subscription_id from database and call
-    # stripe_service.cancel_subscription(subscription_id)
-    return {"success": True, "message": "Subscription scheduled to cancel at period end"}
+    try:
+        subscription = await db.get_subscription(user.id)
+        if not subscription:
+            raise HTTPException(status_code=404, detail="No active subscription found.")
+        
+        stripe_sub_id = subscription.get("stripe_subscription_id")
+        if not stripe_sub_id:
+            raise HTTPException(status_code=400, detail="Subscription has no Stripe ID.")
+        
+        cancelled = await stripe_service.cancel_subscription(stripe_sub_id)
+        
+        # Update database record
+        await db.update_subscription(user.id, {
+            "status": "cancelling",
+            "cancel_at_period_end": True,
+            "current_period_end": cancelled.get("current_period_end"),
+            "updated_at": "now()"
+        })
+        
+        return {
+            "success": True,
+            "message": "Subscription scheduled to cancel at period end.",
+            "cancel_at_period_end": True,
+            "current_period_end": cancelled.get("current_period_end")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to cancel subscription: {str(e)}")

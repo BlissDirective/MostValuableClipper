@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { api } from '@/lib/api';
+import { sourcesApi } from '@/lib/api';
 
 export default function AddSourceScreen() {
   const router = useRouter();
@@ -17,7 +17,7 @@ export default function AddSourceScreen() {
     }
     setLoading(true);
     try {
-      await api.post('/sources', {
+      await sourcesApi.create( {
         title,
         description,
         original_url: url,

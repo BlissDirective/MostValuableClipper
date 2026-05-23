@@ -19,6 +19,18 @@ class UserProfileUpdate(BaseModel):
     avatar_url: Optional[str] = None
     autonomy_mode: Optional[str] = None
 
+class PreferencesUpdate(BaseModel):
+    theme: Optional[str] = None
+    language: Optional[str] = None
+    notifications: Optional[dict] = None
+    privacy: Optional[dict] = None
+    editor_defaults: Optional[dict] = None
+
+class BillingInfo(BaseModel):
+    payment_method: Optional[str] = None
+    billing_address: Optional[dict] = None
+    tax_id: Optional[str] = None
+
 @router.get("/me")
 async def get_current_user_profile(user = Depends(get_current_user)):
     """Get current user's profile."""
@@ -159,3 +171,85 @@ async def get_subscription(user = Depends(get_current_user)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get subscription: {str(e)}")
+
+@router.get("/me/usage")
+async def get_usage(user = Depends(get_current_user)):
+    """Get current month clip usage and quota."""
+    try:
+        subscription = await db.get_subscription(user.id)
+        tier = subscription.get("tier", "free") if subscription else "free"
+        
+        TIER_QUOTAS = {
+            "free": 10,
+            "basic": 50,
+            "pro": 200,
+            "premium": 500,
+            "enterprise": 500,
+        }
+        
+        clips_used = await db.count_clips_this_month(user.id)
+        quota = TIER_QUOTAS.get(tier, 10)
+        
+        return {
+            "clips_used": clips_used,
+            "clips_quota": quota,
+            "tier": tier,
+            "reset_at": None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get usage: {str(e)}")
+
+
+@router.patch("/me/preferences")
+async def update_preferences(
+    prefs: PreferencesUpdate,
+    user = Depends(get_current_user)
+):
+    """Update user preferences (theme, notifications, privacy, editor defaults)."""
+    try:
+        update_data = prefs.model_dump(exclude_unset=True)
+        if not update_data:
+            return {"success": True, "message": "No changes"}
+        
+        # Store preferences in user_metadata for quick access
+        # and also update the profile for persistence
+        await db.update_profile(user.id, {"preferences": update_data})
+        
+        return {"success": True, "preferences": update_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update preferences: {str(e)}")
+
+
+@router.get("/me/billing")
+async def get_billing_info(user = Depends(get_current_user)):
+    """Get billing information for the current user."""
+    try:
+        subscription = await db.get_subscription(user.id)
+        
+        # Get recent invoices from Stripe if subscription exists
+        invoices = []
+        if subscription and subscription.get("stripe_customer_id"):
+            from app.services.stripe_service import stripe_service
+            try:
+                stripe_invoices = stripe_service.list_invoices(
+                    subscription["stripe_customer_id"],
+                    limit=10
+                )
+                invoices = stripe_invoices
+            except Exception:
+                invoices = []
+        
+        return {
+            "subscription": {
+                "tier": subscription.get("tier", "free") if subscription else "free",
+                "status": subscription.get("status", "active") if subscription else "active",
+                "current_period_end": subscription.get("current_period_end") if subscription else None,
+                "cancel_at_period_end": subscription.get("cancel_at_period_end", False) if subscription else False,
+            },
+            "payment_method": subscription.get("payment_method") if subscription else None,
+            "billing_address": subscription.get("billing_address") if subscription else None,
+            "recent_invoices": invoices,
+            "tax_id": subscription.get("tax_id") if subscription else None,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get billing info: {str(e)}")

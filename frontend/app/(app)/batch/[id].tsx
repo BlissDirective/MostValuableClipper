@@ -32,8 +32,8 @@ const STATUS_ICON: Record<string, any> = {
 const STATUS_COLOR: Record<string, string> = {
   queued: tokens.color.text.secondary,
   running: tokens.color.brand.indigo[400],
-  completed: tokens.color.semantic.success,
-  failed: tokens.color.semantic.error,
+  completed: tokens.color.status.success,
+  failed: tokens.color.status.danger,
   cancelled: tokens.color.text.tertiary,
 };
 
@@ -114,14 +114,14 @@ export default function BatchDetailScreen() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.stat}>
-              <Text style={[styles.statValue, { color: tokens.color.semantic.success }]}>
+              <Text style={[styles.statValue, { color: tokens.color.status.success }]}>
                 {processed}
               </Text>
               <Text style={styles.statLabel}>Done</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.stat}>
-              <Text style={[styles.statValue, { color: tokens.color.semantic.error }]}>
+              <Text style={[styles.statValue, { color: tokens.color.status.danger }]}>
                 {failed}
               </Text>
               <Text style={styles.statLabel}>Failed</Text>
@@ -151,8 +151,8 @@ export default function BatchDetailScreen() {
                   backgroundColor: isRunning
                     ? tokens.color.brand.indigo[400]
                     : status === 'failed'
-                    ? tokens.color.semantic.error
-                    : tokens.color.semantic.success,
+                    ? tokens.color.status.danger
+                    : tokens.color.status.success,
                 },
               ]}
             />
@@ -179,7 +179,7 @@ export default function BatchDetailScreen() {
             {job?.results_summary?.savings_percent > 0 && (
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Savings</Text>
-                <Text style={[styles.infoValue, { color: tokens.color.semantic.success }]}>
+                <Text style={[styles.infoValue, { color: tokens.color.status.success }]}>
                   {job.results_summary.savings_percent}% vs individual
                 </Text>
               </View>
@@ -199,13 +199,13 @@ export default function BatchDetailScreen() {
                   </Text>
                   {result.status === 'completed' ? (
                     <CheckCircle2
-                      color={tokens.color.semantic.success}
+                      color={tokens.color.status.success}
                       size={16}
                       strokeWidth={2}
                     />
                   ) : result.status === 'failed' ? (
                     <XCircle
-                      color={tokens.color.semantic.error}
+                      color={tokens.color.status.danger}
                       size={16}
                       strokeWidth={2}
                     />
@@ -232,14 +232,14 @@ export default function BatchDetailScreen() {
 
         {/* Error */}
         {job?.error && (
-          <View style={[styles.infoCard, { borderColor: tokens.color.semantic.error + '30' }]}>
+          <View style={[styles.infoCard, { borderColor: tokens.color.status.danger + '30' }]}>
             <View style={styles.infoRow}>
               <AlertCircle
-                color={tokens.color.semantic.error}
+                color={tokens.color.status.danger}
                 size={18}
                 strokeWidth={2}
               />
-              <Text style={[styles.infoValue, { color: tokens.color.semantic.error, flex: 1 }]}>
+              <Text style={[styles.infoValue, { color: tokens.color.status.danger, flex: 1 }]}>
                 {job.error}
               </Text>
             </View>
@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
   },
   statusCard: {
     backgroundColor: tokens.color.bg.raised,
-    borderRadius: tokens.layout.cardRadius,
+    borderRadius: tokens.radius.lg,
     padding: 20,
     borderWidth: 1,
     borderColor: tokens.color.border.subtle,
@@ -344,7 +344,7 @@ const styles = StyleSheet.create({
   },
   progressCard: {
     backgroundColor: tokens.color.bg.raised,
-    borderRadius: tokens.layout.cardRadius,
+    borderRadius: tokens.radius.lg,
     padding: 20,
     borderWidth: 1,
     borderColor: tokens.color.border.subtle,
@@ -395,7 +395,7 @@ const styles = StyleSheet.create({
   },
   infoCard: {
     backgroundColor: tokens.color.bg.raised,
-    borderRadius: tokens.layout.cardRadius,
+    borderRadius: tokens.radius.lg,
     padding: 16,
     borderWidth: 1,
     borderColor: tokens.color.border.subtle,
@@ -429,7 +429,7 @@ const styles = StyleSheet.create({
   },
   resultCard: {
     backgroundColor: tokens.color.bg.raised,
-    borderRadius: tokens.layout.cardRadius,
+    borderRadius: tokens.radius.lg,
     padding: 14,
     borderWidth: 1,
     borderColor: tokens.color.border.subtle,
@@ -449,7 +449,7 @@ const styles = StyleSheet.create({
   errorText: {
     fontFamily: tokens.type.scale.caption.family,
     fontSize: 12,
-    color: tokens.color.semantic.error,
+    color: tokens.color.status.danger,
     marginTop: 4,
   },
   durationText: {

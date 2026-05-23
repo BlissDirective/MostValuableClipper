@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View, Linking, Alert } from "react-native";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   ChevronRight,
@@ -31,16 +32,28 @@ export default function ProfileScreen() {
   const doSignOut = useAuthStore((s) => s.doSignOut);
   const user = useAuthStore((s) => s.user);
   const connected = useAuthStore((s) => s.draft.connected);
-  const togglePlatform = useAuthStore((s) => s.togglePlatform);
   const subscriptionTier = useAuthStore((s) => s.subscriptionTier);
   const fetchSubscription = useAuthStore((s) => s.fetchSubscription);
   const fetchSocialAccounts = useAuthStore((s) => s.fetchSocialAccounts);
+  const connectPlatform = useAuthStore((s) => s.connectPlatform);
+  const disconnectPlatform = useAuthStore((s) => s.disconnectPlatform);
+  const socialAccounts = useAuthStore((s) => s.socialAccounts);
+  const startOAuth = useAuthStore((s) => s.startOAuth);
   const [showAccounts, setShowAccounts] = useState<boolean>(false);
+  const [connecting, setConnecting] = useState<PlatformKey | null>(null);
 
   useEffect(() => {
     fetchSubscription();
     fetchSocialAccounts();
   }, [fetchSubscription, fetchSocialAccounts]);
+
+  // Refresh social accounts when screen comes into focus
+  // (user may have completed OAuth in browser)
+  useFocusEffect(
+    useCallback(() => {
+      fetchSocialAccounts();
+    }, [fetchSocialAccounts])
+  );
 
   const onSignOut = useCallback(async () => {
     try {
@@ -50,6 +63,91 @@ export default function ProfileScreen() {
       console.error("[profile] sign out error:", err.message);
     }
   }, [doSignOut, router]);
+
+  const handleConnect = useCallback(async (platform: PlatformKey) => {
+    if (connected[platform]) {
+      // Disconnect
+      try {
+        triggerHaptic("blockTriggered");
+        await disconnectPlatform(platform);
+        Alert.alert("Disconnected", `${platform} account has been disconnected.`);
+      } catch (err: any) {
+        Alert.alert("Error", err.message || `Failed to disconnect ${platform}.`);
+      }
+      return;
+    }
+
+    // Show options: OAuth or Manual
+    Alert.alert(
+      `Connect ${platform}`,
+      "Choose how to connect your account:",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "OAuth (Recommended)",
+          onPress: async () => {
+            try {
+              setConnecting(platform);
+              triggerHaptic("blockTriggered");
+              const { auth_url } = await startOAuth(platform);
+              // User is now in browser — app will refresh accounts when they return
+              Alert.alert(
+                "Browser Opened",
+                `Complete ${platform} authorization in your browser. When you're done, return to this app.`,
+                [{ text: "OK", onPress: () => {
+                  // Refresh accounts after a delay to catch completed auth
+                  setTimeout(() => fetchSocialAccounts(), 3000);
+                }}]
+              );
+            } catch (err: any) {
+              Alert.alert("OAuth Failed", err.message || `Could not start ${platform} OAuth.`);
+            } finally {
+              setConnecting(null);
+            }
+          },
+        },
+        {
+          text: "Manual Entry",
+          onPress: () => {
+            // Manual fallback — prompt for handle
+            setConnecting(platform);
+            Alert.prompt(
+              `Connect ${platform}`,
+              `Enter your ${platform} handle (e.g., @username):`,
+              [
+                { text: "Cancel", style: "cancel", onPress: () => setConnecting(null) },
+                {
+                  text: "Connect",
+                  onPress: async (handle?: string) => {
+                    if (!handle || handle.trim().length === 0) {
+                      setConnecting(null);
+                      return;
+                    }
+                    try {
+                      triggerHaptic("blockTriggered");
+                      await connectPlatform(platform, handle.trim());
+                      Alert.alert("Connected", `${platform} account @${handle.trim()} connected successfully.`);
+                    } catch (err: any) {
+                      Alert.alert("Connection Failed", err.message || `Could not connect ${platform}.`);
+                    } finally {
+                      setConnecting(null);
+                    }
+                  },
+                },
+              ],
+              "plain-text",
+              "",
+            );
+          },
+        },
+      ]
+    );
+  }, [connected, startOAuth, connectPlatform, disconnectPlatform, fetchSocialAccounts]);
+
+  const getHandleForPlatform = useCallback((platform: PlatformKey) => {
+    const account = socialAccounts.find((a) => a.platform === platform);
+    return account?.handle;
+  }, [socialAccounts]);
 
   return (
     <SafeAreaView edges={["top"]} style={styles.safe}>
@@ -85,26 +183,27 @@ export default function ProfileScreen() {
           />
           {showAccounts ? (
             <View style={styles.accountsInline}>
-              {PLATFORMS.map((p) => (
-                <View key={p.key} style={styles.accountRow}>
-                  <AccountBadge
-                    platform={p.key as Platform}
-                    handle={connected[p.key] ? "@studio" : undefined}
-                    variant={connected[p.key] ? "pill" : "dot"}
-                  />
-                  <Text style={styles.accountLabel}>{p.label}</Text>
-                  <ActionButton
-                    label={connected[p.key] ? "Disconnect" : "Connect"}
-                    variant={connected[p.key] ? "ghost" : "secondary"}
-                    size="sm"
-                    onPress={() => {
-                      // Social OAuth connection requires platform developer accounts.
-                      // Post-MVP: Implement OAuth flow and backend token exchange.
-                      togglePlatform(p.key);
-                    }}
-                  />
-                </View>
-              ))}
+              {PLATFORMS.map((p) => {
+                const isConnected = connected[p.key];
+                const handle = getHandleForPlatform(p.key);
+                return (
+                  <View key={p.key} style={styles.accountRow}>
+                    <AccountBadge
+                      platform={p.key as Platform}
+                      handle={isConnected ? handle || "@connected" : undefined}
+                      variant={isConnected ? "pill" : "dot"}
+                    />
+                    <Text style={styles.accountLabel}>{p.label}</Text>
+                    <ActionButton
+                      label={isConnected ? "Disconnect" : "Connect"}
+                      variant={isConnected ? "ghost" : "secondary"}
+                      size="sm"
+                      onPress={() => handleConnect(p.key)}
+                      disabled={connecting === p.key}
+                    />
+                  </View>
+                );
+              })}
             </View>
           ) : null}
           <LinkRow
@@ -142,7 +241,7 @@ export default function ProfileScreen() {
 
         <ActionButton label="Sign out" variant="danger" size="md" fullWidth onPress={onSignOut} />
 
-        <Text style={styles.versionText}>MVC · v0.1.0 (Rork preview)</Text>
+        <Text style={styles.versionText}>MVC · v0.1.0</Text>
       </ScrollView>
     </SafeAreaView>
   );

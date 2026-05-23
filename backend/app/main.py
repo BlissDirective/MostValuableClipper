@@ -8,9 +8,10 @@ import logging
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.events import startup_event, shutdown_event
+from app.core.rate_limit import RateLimitMiddleware
 from app.api import (
     health, users, clips, pipelines, sources, earnings,
-    webhooks, social, analytics, legal, auth, subscriptions, swarm
+    webhooks, social, analytics, legal, auth, subscriptions, swarm, worker, agents
 )
 
 # Setup logging
@@ -35,6 +36,7 @@ app = FastAPI(
 
 # Middleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -48,7 +50,7 @@ app.add_middleware(
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        status_code=500,
         content={"detail": "Internal server error"}
     )
 
@@ -65,6 +67,8 @@ app.include_router(webhooks.router, prefix="/api/v1", tags=["webhooks"])
 app.include_router(social.router, prefix="/api/v1", tags=["social"])
 app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
 app.include_router(swarm.router, prefix="/api/v1", tags=["swarm"])
+app.include_router(worker.router, prefix="/api/v1", tags=["worker"])
+app.include_router(agents.router, prefix="/api/v1", tags=["agents"])
 
 # Legal pages (no API prefix - public pages for social platform requirements)
 app.include_router(legal.router, tags=["legal"])

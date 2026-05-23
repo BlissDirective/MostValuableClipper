@@ -1,23 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { api } from '@/lib/api';
-import type { SubscriptionTier } from '@/lib/api';
+import { useAuthStore, SubscriptionTier } from '@/lib/store';
 
 export default function SubscriptionScreen() {
   const router = useRouter();
-  const [currentTier, setCurrentTier] = useState<SubscriptionTier>('free');
+  const [currentTier, setCurrentTier] = useState<string>('free');
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const fetchSubscription = useAuthStore((s) => s.fetchSubscription);
+  const createCheckoutSession = useAuthStore((s) => s.createCheckoutSession);
+  const cancelSubscription = useAuthStore((s) => s.cancelSubscription);
 
   useEffect(() => {
-    fetchSubscription();
+    fetchSubscriptionData();
   }, []);
 
-  const fetchSubscription = async () => {
+  const fetchSubscriptionData = async () => {
     try {
-      const data = await api.get<{ tier: SubscriptionTier; status: string }>('/subscriptions/current');
-      setCurrentTier(data.tier);
+      const data = await fetchSubscription();
+      setCurrentTier(data?.tier || 'free');
     } catch {
       // User not subscribed, default to free
     } finally {
@@ -28,11 +30,7 @@ export default function SubscriptionScreen() {
   const handleSubscribe = async (priceId: string, tierName: string) => {
     setCheckoutLoading(priceId);
     try {
-      const { checkout_url } = await api.post<{ checkout_url: string }>('/subscriptions/checkout', {
-        price_id: priceId,
-        success_url: 'https://your-app.com/success',
-        cancel_url: 'https://your-app.com/cancel',
-      });
+      const { checkout_url } = await createCheckoutSession(tierName);
       // On mobile, open the checkout URL in browser
       // router.push({ pathname: '/checkout', params: { url: checkout_url } });
       Alert.alert('Checkout', `Opening Stripe checkout for ${tierName}...`);
@@ -51,7 +49,7 @@ export default function SubscriptionScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
-            await api.post('/subscriptions/cancel', {});
+            await cancelSubscription();
             setCurrentTier('free');
             Alert.alert('Cancelled', 'Your subscription will end at the current period.');
           } catch {

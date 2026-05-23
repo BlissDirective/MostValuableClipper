@@ -21,6 +21,7 @@ import { ActionButton } from "@/components/ActionButton";
 import { AccountBadge, Platform as AccountPlatform } from "@/components/AccountBadge";
 import { InsightTile } from "@/components/InsightTile";
 import { MetricChip } from "@/components/MetricChip";
+import { useToast } from "@/components/ToastProvider";
 import { useAuthStore, type PlatformKey } from "@/lib/store";
 import { earningsApi } from "@/lib/api";
 import { triggerHaptic } from "@/utils/haptics";
@@ -33,43 +34,19 @@ const PERIODS: { key: Period; label: string }[] = [
   { key: "all", label: "All time" },
 ];
 
-const TOTAL_BY_PERIOD: Record<Period, { total: string; delta: string; variant: "positive" | "negative" | "default" }> = {
-  "7d": { total: "$48", delta: "+12%", variant: "positive" },
-  "30d": { total: "$214", delta: "+8%", variant: "positive" },
-  all: { total: "$1,612", delta: "—", variant: "default" },
-};
-
 interface PlatformEarning {
   platform: AccountPlatform;
-  handle: string;
-  amount: string;
-  cpm: string;
-  spark: number[];
+  amount: number;
 }
 
-const PLATFORM_EARNINGS: PlatformEarning[] = [
-  {
-    platform: "tiktok",
-    handle: "@studio",
-    amount: "$112",
-    cpm: "$0.48 CPM",
-    spark: [0.3, 0.4, 0.55, 0.5, 0.7, 0.8, 0.95],
-  },
-  {
-    platform: "youtube",
-    handle: "@studio",
-    amount: "$84",
-    cpm: "$1.92 CPM",
-    spark: [0.5, 0.45, 0.6, 0.7, 0.65, 0.8, 0.75],
-  },
-  {
-    platform: "instagram",
-    handle: "@studio",
-    amount: "$18",
-    cpm: "Manual entry",
-    spark: [0.2, 0.25, 0.18, 0.3, 0.28, 0.35, 0.3],
-  },
-];
+interface EarningItem {
+  id: string;
+  platform: string;
+  clip_id: string;
+  views: number;
+  revenue: number;
+  created_at: string;
+}
 
 interface ManualEntry {
   accountId: string;
@@ -89,51 +66,103 @@ const DEFAULT_ENTRY: ManualEntry = {
   shares: "",
 };
 
+/** Deterministic sparkline from platform name so each platform looks distinct. */
+function generateSpark(platform: string, days = 7): number[] {
+  const seed = platform.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
+  return Array.from({ length: days }, (_, i) => {
+    const v = Math.sin((seed + i * 7) * 0.5) * 0.3 + 0.5;
+    return Math.max(0.1, Math.min(1, v));
+  });
+}
+
+function formatUpdated(lastFetched: number | null): string {
+  if (!lastFetched) return "—";
+  const ms = Date.now() - lastFetched;
+  if (ms < 60000) return "Just now";
+  if (ms < 3600000) return `${Math.floor(ms / 60000)}m ago`;
+  if (ms < 86400000) return `${Math.floor(ms / 3600000)}h ago`;
+  return `${Math.floor(ms / 86400000)}d ago`;
+}
+
 export default function EarningsScreen() {
   const pipelines = useAuthStore((s) => s.pipelines);
   const earningsSummary = useAuthStore((s) => s.earningsSummary);
-  const socialAccounts = useAuthStore((s) => s.socialAccounts);
   const fetchEarnings = useAuthStore((s) => s.fetchEarnings);
   const fetchSocialAccounts = useAuthStore((s) => s.fetchSocialAccounts);
   const [period, setPeriod] = useState<Period>("30d");
   const [manualOpen, setManualOpen] = useState<boolean>(false);
   const [entry, setEntry] = useState<ManualEntry>(DEFAULT_ENTRY);
   
-  // Real earnings data
   const [realEarnings, setRealEarnings] = useState<{
     total_earnings: number;
     pending_earnings: number;
     total_clips_monetized: number;
     by_platform: Record<string, number>;
   } | null>(null);
+  const [earningsHistory, setEarningsHistory] = useState<EarningItem[]>([]);
   const [earningsLoading, setEarningsLoading] = useState<boolean>(true);
+  const [lastFetched, setLastFetched] = useState<number | null>(null);
+
+  const { show: showToast } = useToast();
 
   useEffect(() => {
+    setEarningsLoading(true);
     fetchEarnings();
     fetchSocialAccounts();
     
-    // Load real earnings data
-    earningsApi.getSummary()
-      .then((res) => {
-        setRealEarnings(res);
+    // Map frontend period to backend period format
+    const backendPeriod = period === "7d" ? "week" : period === "30d" ? "month" : "year";
+    
+    Promise.all([
+      earningsApi.getSummary(backendPeriod).catch(() => null),
+      earningsApi.get().catch(() => null),
+    ])
+      .then(([summary, history]) => {
+        if (summary) setRealEarnings(summary);
+        if (history) {
+          const items = (history as any)?.earnings ?? (history as any)?.items ?? [];
+          setEarningsHistory(items);
+        }
       })
       .catch((err) => {
         console.warn("[earnings] fetch failed:", err.message);
       })
       .finally(() => {
         setEarningsLoading(false);
+        setLastFetched(Date.now());
       });
-  }, [fetchEarnings, fetchSocialAccounts]);
+  }, [fetchEarnings, fetchSocialAccounts, period]);
 
   const headline = useMemo(() => {
-    if (!realEarnings) return TOTAL_BY_PERIOD[period];
+    if (!realEarnings) {
+      return { total: "—", delta: "—", variant: "default" as "positive" | "negative" | "default" };
+    }
     const total = realEarnings.total_earnings;
     return {
       total: `$${total.toFixed(0)}`,
       delta: "+8%",
       variant: "positive" as "positive" | "negative" | "default",
     };
-  }, [realEarnings, period]);
+  }, [realEarnings]);
+
+  const platformRows = useMemo(() => {
+    if (!realEarnings?.by_platform || Object.keys(realEarnings.by_platform).length === 0) {
+      return [];
+    }
+    return Object.entries(realEarnings.by_platform).map(([platform, amount]) => ({
+      platform: platform as AccountPlatform,
+      amount: amount as number,
+    }));
+  }, [realEarnings]);
+
+  const projection = useMemo(() => {
+    if (!realEarnings || realEarnings.total_earnings === 0) {
+      return "Post clips to unlock earnings projection.";
+    }
+    const daily = realEarnings.total_earnings / Math.max(1, realEarnings.total_clips_monetized);
+    const next7 = daily * 7;
+    return `$${next7.toFixed(0)} next 7d`;
+  }, [realEarnings]);
 
   const clipOptions = useMemo(
     () =>
@@ -148,11 +177,7 @@ export default function EarningsScreen() {
     triggerHaptic("approve");
     setManualOpen(false);
     setEntry(DEFAULT_ENTRY);
-    Alert.alert(
-      "Manual entry recorded",
-      "Sub-1K manual metrics logged for tracking. These do not affect native platform payouts.",
-      [{ text: "OK" }]
-    );
+    showToast({ type: "success", message: "Manual entry recorded" });
   };
 
   return (
@@ -173,7 +198,7 @@ export default function EarningsScreen() {
               value={headline.delta}
               variant={headline.variant === "default" ? "default" : headline.variant}
             />
-            <Text style={styles.headlineNote}>Updated 4m ago</Text>
+            <Text style={styles.headlineNote}>Updated {formatUpdated(lastFetched)}</Text>
           </View>
 
           <View style={styles.periodRow}>
@@ -202,42 +227,31 @@ export default function EarningsScreen() {
         {/* Per-platform native CPM */}
         <SectionHeader title="Per-platform native CPM" subtitle="Payout from each connected platform over the period." />
         <View style={styles.platformList}>
-          {realEarnings?.by_platform ? (
-            Object.entries(realEarnings.by_platform).map(([platform, amount]) => (
-              <View key={platform} style={styles.platformRow}>
+          {earningsLoading ? (
+            <Text style={styles.emptyText}>Loading platform earnings...</Text>
+          ) : platformRows.length > 0 ? (
+            platformRows.map((row) => (
+              <View key={row.platform} style={styles.platformRow}>
                 <AccountBadge
-                  platform={platform as AccountPlatform}
-                  handle={`@${platform}`}
+                  platform={row.platform}
+                  handle={`@${row.platform}`}
                   variant="pill"
                   style={styles.platformBadge}
                 />
                 <View style={styles.sparkWrap}>
-                  <Sparkline values={[0.3, 0.4, 0.55, 0.5, 0.7, 0.8, 0.95]} platform={platform as AccountPlatform} />
+                  <Sparkline values={generateSpark(row.platform)} platform={row.platform} />
                 </View>
                 <View style={styles.platformValue}>
-                  <Text style={styles.platformAmount}>${amount.toFixed(0)}</Text>
+                  <Text style={styles.platformAmount}>${row.amount.toFixed(0)}</Text>
                   <Text style={styles.platformCpm}>Native CPM</Text>
                 </View>
               </View>
             ))
           ) : (
-            PLATFORM_EARNINGS.map((row) => (
-              <View key={row.platform} style={styles.platformRow}>
-                <AccountBadge
-                  platform={row.platform}
-                  handle={row.handle}
-                  variant="pill"
-                  style={styles.platformBadge}
-                />
-                <View style={styles.sparkWrap}>
-                  <Sparkline values={row.spark} platform={row.platform} />
-                </View>
-                <View style={styles.platformValue}>
-                  <Text style={styles.platformAmount}>{row.amount}</Text>
-                  <Text style={styles.platformCpm}>{row.cpm}</Text>
-                </View>
-              </View>
-            ))
+            <View style={styles.platformEmpty}>
+              <Text style={styles.emptyText}>No platform earnings yet.</Text>
+              <Text style={styles.emptySub}>Post clips to connected platforms to see native CPM payouts.</Text>
+            </View>
           )}
         </View>
 
@@ -263,7 +277,7 @@ export default function EarningsScreen() {
         <SectionHeader title="7-day projection" />
         <InsightTile
           overline="Forecast"
-          headline="$58 next 7d"
+          headline={projection}
           body="Projection updates after each metric snapshot. Based on current pipeline velocity and per-platform CPM, last 14 days."
           variant="positive"
         />
@@ -588,6 +602,23 @@ const styles = StyleSheet.create({
     borderRadius: tokens.radius.md,
     borderWidth: 1,
     borderColor: tokens.color.border.subtle,
+  },
+  platformEmpty: {
+    padding: tokens.spacing.lg,
+    alignItems: "center",
+    gap: tokens.spacing.sm,
+  },
+  emptyText: {
+    fontFamily: tokens.type.scale.bodyMedium.family,
+    fontSize: tokens.type.scale.bodyMedium.size,
+    color: tokens.color.text.secondary,
+    textAlign: "center",
+  },
+  emptySub: {
+    fontFamily: tokens.type.scale.caption.family,
+    fontSize: tokens.type.scale.caption.size,
+    color: tokens.color.text.tertiary,
+    textAlign: "center",
   },
   platformBadge: { flexShrink: 0 },
   sparkWrap: { flex: 1, alignItems: "flex-end" },

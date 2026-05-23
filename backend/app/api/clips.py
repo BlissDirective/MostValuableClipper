@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
 from app.models import (
@@ -14,6 +14,7 @@ from app.services.scheduler import PostScheduler
 from app.services.r2_service import R2Service
 from app.services.zernio_service import ZernioService
 from app.services.ffmpeg_service import FFmpegEditService
+from app.services.music_library_service import music_library_service as music_library
 from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/clips", tags=["clips"])
@@ -733,30 +734,132 @@ async def list_ab_tests(
 @router.get("/music/tracks")
 async def list_music_tracks(
     mood: Optional[str] = None,
+    genre: Optional[str] = None,
+    vibe: Optional[str] = None,
+    source: Optional[str] = None,
+    search: Optional[str] = None,
     user=Depends(get_current_user)
 ):
-    """List available background music tracks."""
+    """List available background music tracks with multi-dimensional filtering."""
     try:
-        tracks = music_library.list_tracks(mood=mood)
+        tracks = music_library.list_tracks(
+            mood=mood,
+            genre=genre,
+            vibe=vibe,
+            source=source,
+            search=search,
+        )
+        distinct = music_library.get_distinct_values()
         return {
             "tracks": tracks,
             "total": len(tracks),
+            "filters": {
+                "genres": distinct["genres"],
+                "vibes": distinct["vibes"],
+                "moods": distinct["moods"],
+                "sources": distinct["sources"],
+            },
             "sources": {
-                "bundled": "Free royalty-free tracks from YouTube Audio Library + Pixabay",
-                "tiktok": "TikTok Commercial Music Library (requires TikTok for Business account)"
+                "bundled": "Pre-bundled royalty-free tracks",
+                "pixabay": "Pixabay Music (CC0)",
+                "fma": "Free Music Archive (CC)",
+                "incompetech": "Incompetech / Kevin MacLeod (CC BY)",
+                "user_upload": "User-uploaded tracks",
             }
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list tracks: {str(e)}")
 
 
+@router.post("/music/upload")
+async def upload_music_track(
+    file: UploadFile,
+    title: str,
+    artist: Optional[str] = "Unknown",
+    genre: Optional[str] = "misc",
+    vibe: Optional[str] = "neutral",
+    license_type: Optional[str] = "user_owned",
+    user=Depends(get_current_user)
+):
+    """Upload a custom music track to the library.
+    
+    The track will be stored in user_uploads/ and made available
+    for mixing in clips.
+    """
+    try:
+        # Validate file
+        if not file.filename or not file.filename.endswith(".mp3"):
+            raise HTTPException(status_code=400, detail="Only MP3 files are supported")
+        
+        # Save to temp
+        temp_path = f"/tmp/upload_{user.id}_{file.filename}"
+        with open(temp_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        # Add to library
+        track = music_library.add_user_upload(
+            file_path=temp_path,
+            user_id=user.id,
+            title=title,
+            artist=artist,
+            genre=genre,
+            vibe=vibe,
+            license_type=license_type,
+        )
+        
+        return {
+            "success": True,
+            "track": music_library.get_track_info(track.id),
+            "message": f"Track '{title}' uploaded successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@router.post("/music/reload-catalog")
+async def reload_music_catalog(user=Depends(get_current_user)):
+    """Reload the music catalog (for admin use after bulk downloads)."""
+    try:
+        music_library.reload()
+        distinct = music_library.get_distinct_values()
+        return {
+            "success": True,
+            "total_tracks": len(music_library.tracks),
+            "filters": {
+                "genres": distinct["genres"],
+                "vibes": distinct["vibes"],
+                "moods": distinct["moods"],
+                "sources": distinct["sources"],
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reload failed: {str(e)}")
+
+
 @router.post("/{clip_id}/preview-music")
 async def preview_music_mix(
     clip_id: str,
     track_id: str,
+    profile: str = "background",
+    preview_duration: Optional[float] = None,
+    custom_duck_factor: Optional[float] = None,
     user=Depends(get_current_user)
 ):
-    """Generate a preview of a clip with background music mixed in."""
+    """Generate a music-mixed preview of a clip.
+    
+    Renders a preview video with background music mixed in using FFmpeg.
+    The preview is stored in R2 and returned as a presigned URL.
+    
+    Args:
+        track_id: Music track ID from /music/tracks
+        profile: Mix profile — prominent, background, intro_only, outro_only, build
+        preview_duration: Optional — render only first N seconds for quick preview
+        custom_duck_factor: Optional — override profile ducking (0.0-1.0)
+    """
     try:
         db = SupabaseService()
         
@@ -766,33 +869,34 @@ async def preview_music_mix(
         if clip.get("user_id") != user.id:
             raise HTTPException(status_code=403, detail="Not authorized")
         
-        # Get track
-        track = music_library.get_track_info(track_id)
-        if not track:
-            raise HTTPException(status_code=404, detail="Track not found")
+        video_url = clip.get("video_url")
+        if not video_url:
+            raise HTTPException(status_code=400, detail="Clip has no video URL")
         
-        if not track.get("available"):
-            raise HTTPException(status_code=400, detail="Track not available (missing file)")
+        from app.services.music_mix_service import music_mix_service
         
-        # For MVP: Return info about how to preview
-        # Full implementation would render a preview with FFmpeg
+        result = await music_mix_service.generate_preview(
+            clip_id=clip_id,
+            video_url=video_url,
+            track_id=track_id,
+            profile=profile,
+            preview_duration=preview_duration,
+            custom_duck_factor=custom_duck_factor,
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Preview generation failed"))
+        
         return {
             "success": True,
             "clip_id": clip_id,
-            "track": track,
-            "preview_url": None,  # Would be a presigned R2 URL after rendering
-            "message": "Music preview feature: download tracks to /app/music/ to enable mixing",
-            "setup_guide": {
-                "step_1": "Download free tracks from youtube.com/audiolibrary/music or pixabay.com/music",
-                "step_2": f"Place MP3 files in the app's music directory",
-                "step_3": "Update BUNDLED_TRACKS in music_library_service.py with track metadata",
-                "no_account_required": True,
-                "upgrade_options": [
-                    {"service": "TikTok Commercial Music Library", "cost": "Free", "account": "TikTok for Business"},
-                    {"service": "Epidemic Sound", "cost": "$15/month", "account": "Required"},
-                    {"service": "Artlist", "cost": "$30/month", "account": "Required"}
-                ]
-            }
+            "track_id": track_id,
+            "job_id": result["job_id"],
+            "preview_url": result["preview_url"],
+            "profile": result["profile"],
+            "duck_factor": result["duck_factor"],
+            "duration": result["duration"],
+            "expires_at": result["expires_at"],
         }
         
     except HTTPException:
@@ -801,9 +905,148 @@ async def preview_music_mix(
         raise HTTPException(status_code=500, detail=f"Failed to preview music: {str(e)}")
 
 
+@router.get("/music/profiles")
+async def list_mix_profiles(user=Depends(get_current_user)):
+    """List available music mix profiles."""
+    from app.services.music_mix_service import music_mix_service
+    return {
+        "profiles": music_mix_service.get_profiles()
+    }
+
+
 # ─────────────────────────────────────────────────────────────
-# Claude LLM Hook Generation Endpoint (for testing/debug)
+# Edit Swarm Agent Endpoints
 # ─────────────────────────────────────────────────────────────
+
+from app.services.edit_agent_service import EditSwarm
+
+class EditAgentsRequest(BaseModel):
+    agents: List[str]  # e.g., ["sticker", "music", "color"]
+    clip_data: Optional[Dict[str, Any]] = None
+    settings: Optional[Dict[str, Any]] = None
+
+class EditAgentsResponse(BaseModel):
+    recipe: Dict[str, Any]
+    agents_run: List[Dict[str, Any]]
+    total_cost_estimate: float
+    clip_id: Optional[str] = None
+
+@router.post("/{clip_id}/edit-agents")
+async def run_edit_agents(
+    clip_id: str,
+    request: EditAgentsRequest,
+    user=Depends(get_current_user)
+):
+    """Run selected Edit Swarm agents and return a merged edit recipe.
+    
+    Agents analyze the clip and generate an edit recipe that can be
+    applied via the standard /edit endpoint.
+    
+    Available agents: sticker, transition, music, color, caption, pacing, thumbnail
+    """
+    try:
+        db = SupabaseService()
+        
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        # Build clip_data for agents
+        clip_data = request.clip_data or {}
+        clip_data.setdefault("id", clip_id)
+        clip_data.setdefault("caption", clip.get("caption", ""))
+        clip_data.setdefault("duration", clip.get("duration", 30))
+        clip_data.setdefault("platform", clip.get("platform", "tiktok"))
+        clip_data.setdefault("tags", clip.get("tags", []))
+        
+        swarm = EditSwarm()
+        result = await swarm.run(
+            clip_data=clip_data,
+            agents=request.agents,
+            settings=request.settings or {}
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent swarm failed: {str(e)}")
+
+
+@router.post("/{clip_id}/edit-analyze")
+async def analyze_clip_for_editing(
+    clip_id: str,
+    user=Depends(get_current_user)
+):
+    """Analyze a clip with all agents and return enhancement suggestions.
+    
+    Returns per-agent analysis, cost estimates, and quality scores.
+    Use this to decide which agents to run.
+    """
+    try:
+        db = SupabaseService()
+        
+        clip = await db.get_clip(clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        clip_data = {
+            "id": clip_id,
+            "caption": clip.get("caption", ""),
+            "duration": clip.get("duration", 30),
+            "platform": clip.get("platform", "tiktok"),
+            "tags": clip.get("tags", []),
+        }
+        
+        swarm = EditSwarm()
+        suggestions = await swarm.analyze_clip(clip_data)
+        
+        return {
+            "clip_id": clip_id,
+            "suggestions": suggestions,
+            "total_agents": len(suggestions),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+
+@router.get("/assets/stickers")
+async def list_sticker_assets(user=Depends(get_current_user)):
+    """List all available sticker assets."""
+    from app.services.edit_agent_service import StickerAgent
+    agent = StickerAgent()
+    return {
+        "stickers": agent.STICKER_LIBRARY,
+        "positions": list(agent.POSITION_PRESETS.keys())
+    }
+
+
+@router.get("/assets/transitions")
+async def list_transition_assets(user=Depends(get_current_user)):
+    """List all available transition types."""
+    from app.services.edit_agent_service import TransitionAgent
+    agent = TransitionAgent()
+    return {
+        "transitions": agent.TRANSITION_LIBRARY
+    }
+
+
+@router.get("/assets/music")
+async def list_music_assets(user=Depends(get_current_user)):
+    """List all available music tracks."""
+    from app.services.edit_agent_service import MusicAgent
+    agent = MusicAgent()
+    return {
+        "tracks": agent.MUSIC_LIBRARY
+    }
 
 @router.post("/generate-hooks")
 async def generate_hooks_llm(

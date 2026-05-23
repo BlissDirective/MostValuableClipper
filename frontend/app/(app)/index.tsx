@@ -19,57 +19,8 @@ import { useSwarmBatch } from "@/lib/api-hooks";
 import { ActionButton } from "@/components/ActionButton";
 import { ClipCard, ClipCardData } from "@/components/ClipCard";
 import { MetricChip } from "@/components/MetricChip";
-import { SwarmConfigModal } from "@/components/SwarmConfigModal";
+import SwarmConfigModal from "@/components/SwarmConfigModal";
 import { triggerHaptic } from "@/utils/haptics";
-
-const PLACEHOLDER_CLIPS: ClipCardData[] = [
-  {
-    id: "clip-1",
-    sourceName: "Design Details · Ep 412",
-    caption:
-      "The hidden cost of skeuomorphism in modern productivity apps and why nobody talks about it.",
-    platforms: [
-      { platform: "tiktok", handle: "@studio" },
-      { platform: "instagram", handle: "@studio" },
-      { platform: "youtube", handle: "@studio" },
-    ],
-    metrics: { views: "24.1K", retention: "+18%", earnings: "$3.40", retentionVariant: "positive" },
-    state: "posted",
-    safety: null,
-  },
-  {
-    id: "clip-2",
-    sourceName: "F1 Race Recap · Imola",
-    caption:
-      "Lap 38 — the undercut that decided the podium. Three-camera angle reconstruction inside.",
-    platforms: [
-      { platform: "tiktok" },
-      { platform: "instagram" },
-    ],
-    state: "queued",
-    queuedFor: "8m",
-    safety: null,
-  },
-  {
-    id: "clip-3",
-    sourceName: "Health & Wellness Daily",
-    caption:
-      "New cohort study on intermittent fasting metabolic markers — what the headlines miss.",
-    platforms: [{ platform: "tiktok" }, { platform: "youtube" }],
-    metrics: { views: "—", retention: "—", earnings: "—" },
-    state: "held-safety-warn",
-    safety: { variant: "warn", categories: ["Health · disclosure recommended"] },
-  },
-  {
-    id: "clip-4",
-    sourceName: "Live Stream Highlight",
-    caption:
-      "Crowd reaction sync from a copyrighted broadcast — held pending rights review.",
-    platforms: [{ platform: "tiktok" }, { platform: "instagram" }, { platform: "youtube" }],
-    state: "held-safety-block",
-    safety: { variant: "block", categories: ["Copyrighted material risk"] },
-  },
-];
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -80,6 +31,9 @@ export default function HomeScreen() {
   const rejectClip = useAuthStore((s) => s.rejectClip);
   const deleteClip = useAuthStore((s) => s.deleteClip);
   const pipelines = useAuthStore((s) => s.pipelines);
+  const fetchPipelines = useAuthStore((s) => s.fetchPipelines);
+  const earningsSummary = useAuthStore((s) => s.earningsSummary);
+  const fetchEarnings = useAuthStore((s) => s.fetchEarnings);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   // Batch selection state
@@ -110,6 +64,13 @@ export default function HomeScreen() {
     [clips]
   );
 
+  // Fetch all data on mount
+  useEffect(() => {
+    fetchClips();
+    fetchPipelines();
+    fetchEarnings();
+  }, [fetchClips, fetchPipelines, fetchEarnings]);
+
   // Selection handlers
   const toggleSelection = useCallback((clipId: string) => {
     setSelectedClips((prev) => {
@@ -124,7 +85,7 @@ export default function HomeScreen() {
   }, []);
 
   const enterSelectionMode = useCallback((clipId: string) => {
-    triggerHaptic("heavy");
+    triggerHaptic("blockTriggered");
     setSelectionMode(true);
     setSelectedClips(new Set([clipId]));
   }, []);
@@ -148,7 +109,7 @@ export default function HomeScreen() {
 
   const handleBatchExecute = useCallback(async (config: any) => {
     try {
-      triggerHaptic("heavy");
+      triggerHaptic("blockTriggered");
       const clipIds = Array.from(selectedClips);
       const result = await runBatch({
         clipIds,
@@ -186,14 +147,10 @@ export default function HomeScreen() {
     );
   }, [selectedClips, deleteClip, exitSelectionMode]);
 
-  useEffect(() => {
-    fetchClips();
-  }, [fetchClips]);
-
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchClips().finally(() => setRefreshing(false));
-  }, [fetchClips]);
+    Promise.all([fetchClips(), fetchPipelines(), fetchEarnings()]).finally(() => setRefreshing(false));
+  }, [fetchClips, fetchPipelines, fetchEarnings]);
 
   const renderItem: ListRenderItem<ClipCardData> = useCallback(
     ({ item }) => (
@@ -300,6 +257,7 @@ export default function HomeScreen() {
                 activePipelineCount={activePipelineCount}
                 queuedCount={queuedCount}
                 postedToday={postedToday}
+                earningsSummary={earningsSummary}
                 onNewPipeline={() => {
                   router.push("/(app)/pipelines");
                 }}
@@ -417,10 +375,14 @@ interface StatusStripProps {
   activePipelineCount: number;
   queuedCount: number;
   postedToday: number;
+  earningsSummary: { total_earnings: number; by_platform: Record<string, number> } | null;
   onNewPipeline: () => void;
 }
 
-function StatusStrip({ activePipelineCount, queuedCount, postedToday, onNewPipeline }: StatusStripProps) {
+function StatusStrip({ activePipelineCount, queuedCount, postedToday, earningsSummary, onNewPipeline }: StatusStripProps) {
+  const earningsValue = earningsSummary ? `$${earningsSummary.total_earnings.toFixed(0)}` : "$0";
+  const platformCount = earningsSummary ? Object.keys(earningsSummary.by_platform).length : 0;
+  
   return (
     <View style={styles.stripWrap}>
       <View style={styles.strip}>
@@ -433,9 +395,9 @@ function StatusStrip({ activePipelineCount, queuedCount, postedToday, onNewPipel
           style={styles.stripChip}
         />
         <MetricChip
-          label="Earnings · 7d"
-          value="$48.20"
-          delta="+12%"
+          label="Earnings · total"
+          value={earningsValue}
+          delta={platformCount > 0 ? `${platformCount} platforms` : "—"}
           variant="positive"
           style={styles.stripChip}
         />

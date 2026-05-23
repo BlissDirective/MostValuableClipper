@@ -9,6 +9,8 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
+import { Link2 } from "lucide-react-native";
+import { EmptyState } from "@/components/EmptyState";
 import { useSources, usePipelines } from '../../lib/api-hooks';
 import { design, haptics } from '../../constants';
 
@@ -134,10 +136,13 @@ export function SourceScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No sources yet</Text>
-            <Text style={styles.emptySub}>Add a YouTube channel or video URL</Text>
-          </View>
+          <EmptyState
+            icon={Link2}
+            title="No sources yet"
+            subtitle="Add a YouTube channel or video URL to start generating clips."
+            actionLabel="Add Source"
+            size="md"
+          />
         }
       />
     </View>

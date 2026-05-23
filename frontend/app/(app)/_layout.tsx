@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Home, GitBranch, LineChart, DollarSign, UserRound } from "lucide-react-native";
+import { Home, GitBranch, LineChart, DollarSign, UserRound, Search } from "lucide-react-native";
 import React from "react";
 
 import { tokens } from "@/constants/tokens";
@@ -39,6 +39,13 @@ export default function AppTabsLayout() {
         options={{
           title: "Home",
           tabBarIcon: ({ color }) => <Home color={color} size={tokens.icon.size.md} strokeWidth={tokens.icon.stroke.default} />,
+        }}
+      />
+      <Tabs.Screen
+        name="content-discovery"
+        options={{
+          title: "Discover",
+          tabBarIcon: ({ color }) => <Search color={color} size={tokens.icon.size.md} strokeWidth={tokens.icon.stroke.default} />,
         }}
       />
       <Tabs.Screen
@@ -119,6 +126,14 @@ export default function AppTabsLayout() {
       />
       <Tabs.Screen
         name="profile/settings"
+        options={{
+          href: null,
+          headerShown: false,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+      <Tabs.Screen
+        name="add-source"
         options={{
           href: null,
           headerShown: false,
