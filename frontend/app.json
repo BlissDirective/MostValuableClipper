@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "rork-app",
+    "scheme": "blissclip",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -16,7 +16,6 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.blissdirective.blissclip",
-      "buildNumber": "1.0.0",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "BlissClip saves your generated clips to your photo library so you can share them to social media.",
         "NSPhotoLibraryAddUsageDescription": "BlissClip saves your generated clips to your photo library.",
@@ -29,7 +28,6 @@
         "backgroundColor": "#000000"
       },
       "package": "com.blissdirective.blissclip",
-      "versionCode": 1,
       "permissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",

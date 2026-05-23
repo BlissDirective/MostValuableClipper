@@ -53,7 +53,7 @@ Thumbs.db
 
 # Node
 node_modules/
-package-lock.json
+# package-lock.json
 
 # Misc
 *.bak
