@@ -78,13 +78,23 @@ app.include_router(legal.router, tags=["legal"])
 web_dist_path = os.path.join(os.path.dirname(__file__), "../frontend/dist")
 if os.path.exists(web_dist_path):
     from fastapi.staticfiles import StaticFiles
+    from starlette.exceptions import HTTPException as StarletteHTTPException
     from fastapi.responses import FileResponse
     
-    app.mount("/app", StaticFiles(directory=web_dist_path, html=True), name="web")
+    # Mount static files for assets, but handle SPA routing manually
+    app.mount("/app/assets", StaticFiles(directory=os.path.join(web_dist_path, "assets")), name="assets")
+    app.mount("/app/_expo", StaticFiles(directory=os.path.join(web_dist_path, "_expo")), name="expo")
     
-    @app.get("/app/{full_path:path}")
-    async def spa_catch_all(full_path: str):
-        """SPA fallback — serve index.html for client-side routes"""
+    @app.get("/app", response_class=FileResponse)
+    async def serve_app_root():
+        return FileResponse(os.path.join(web_dist_path, "index.html"))
+    
+    @app.get("/app/{full_path:path}", response_class=FileResponse)
+    async def serve_app_spa(full_path: str):
+        # Don't intercept API routes
+        if full_path.startswith("api/"):
+            raise StarletteHTTPException(status_code=404)
+        # Serve index.html for all client-side routes
         return FileResponse(os.path.join(web_dist_path, "index.html"))
 
 @app.get("/")
