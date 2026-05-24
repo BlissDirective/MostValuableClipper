@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 
 from app.services.database import SupabaseService, supabase
