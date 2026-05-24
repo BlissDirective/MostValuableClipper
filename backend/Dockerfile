@@ -13,8 +13,11 @@ RUN apt-get update && apt-get install -y \
 COPY ${SOURCE_DIR}/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application
+# Copy backend application
 COPY ${SOURCE_DIR}/ .
+
+# Copy frontend web build (if exists in build context)
+COPY ${SOURCE_DIR}/../frontend/dist ./frontend/dist 2>/dev/null || true
 
 # Run migrations on startup (optional, can be done separately)
 # RUN python -m app.migrations
