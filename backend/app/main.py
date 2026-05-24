@@ -75,7 +75,7 @@ app.include_router(agents.router, prefix="/api/v1", tags=["agents"])
 app.include_router(legal.router, tags=["legal"])
 
 # Web SPA serving (production build)
-web_dist_path = os.path.join(os.path.dirname(__file__), "../../frontend/dist")
+web_dist_path = os.path.join(os.path.dirname(__file__), "../frontend/dist")
 if os.path.exists(web_dist_path):
     from fastapi.staticfiles import StaticFiles
     from fastapi.responses import FileResponse
