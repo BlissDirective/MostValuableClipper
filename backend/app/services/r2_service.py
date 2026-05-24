@@ -1,4 +1,5 @@
 import boto3
+import os
 from botocore.config import Config
 import requests
 from typing import Optional, BinaryIO
