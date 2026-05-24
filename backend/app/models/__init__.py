@@ -353,6 +353,14 @@ class SwarmRateLimit(BaseModel):
 
 
 
+class EarningsSummary(BaseModel):
+    """Summary of earnings across all platforms."""
+    total_earnings: float = 0
+    pending_earnings: float = 0
+    paid_earnings: float = 0
+    total_clips_monetized: int = 0
+    by_platform: Dict[str, float] = {}
+
 # ============================================
 # CLIP REMIX MODELS
 # ============================================
