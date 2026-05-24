@@ -314,5 +314,5 @@ class MusicLibraryService:
 
 
 # Singleton
-music_library_service = MusicLibraryService()
+music_library = MusicLibraryService()
 music_library_service = music_library  # Backward compatibility alias
