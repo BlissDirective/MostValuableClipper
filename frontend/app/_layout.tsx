@@ -12,7 +12,7 @@ import {
   Inter_600SemiBold,
   Inter_700Bold,
 } from "@expo-google-fonts/inter";
-import { View } from "react-native";
+import { View, Platform } from "react-native";
 
 import { tokens } from "@/constants/tokens";
 import { useAuthStore } from "@/lib/store";
@@ -42,8 +42,12 @@ function AuthGate() {
     const first = segments[0] as string | undefined;
     const inAuth = first === "(auth)";
     const inApp = first === "(app)";
+    const inLanding = first === "landing";
 
-    if (!isAuthenticated && !inAuth) {
+    // On web, allow landing page to be public
+    if (Platform.OS === "web" && inLanding) return;
+
+    if (!isAuthenticated && !inAuth && !inLanding) {
       router.replace("/(auth)/welcome");
     } else if (isAuthenticated && !hasOnboarded && !inAuth) {
       router.replace("/(auth)/theme-input");
