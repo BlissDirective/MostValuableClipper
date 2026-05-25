@@ -74,13 +74,13 @@ app.include_router(agents.router, prefix="/api/v1", tags=["agents"])
 # Legal pages (no API prefix - public pages for social platform requirements)
 app.include_router(legal.router, tags=["legal"])
 
-# Web SPA serving (production build)
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.responses import FileResponse
+
+# ── WEB APP (Expo export, served at /app) ───────────────────
 web_dist_path = os.path.join(os.path.dirname(__file__), "../frontend/dist")
 if os.path.exists(web_dist_path):
-    from fastapi.staticfiles import StaticFiles
-    from starlette.exceptions import HTTPException as StarletteHTTPException
-    from fastapi.responses import FileResponse
-    
     # Mount static files for assets, but handle SPA routing manually
     app.mount("/app/assets", StaticFiles(directory=os.path.join(web_dist_path, "assets")), name="assets")
     app.mount("/app/_expo", StaticFiles(directory=os.path.join(web_dist_path, "_expo")), name="expo")
@@ -97,16 +97,23 @@ if os.path.exists(web_dist_path):
         # Serve index.html for all client-side routes
         return FileResponse(os.path.join(web_dist_path, "index.html"))
 
-@app.get("/")
-async def root():
-    return {
-        "message": "MVC API", 
-        "version": "0.1.0", 
-        "docs": "/api/docs",
-        "web_app": "/app",
-        "legal": {
-            "privacy": "/privacy",
-            "terms": "/terms",
-            "dmca": "/dmca"
-        }
-    }
+# ── LANDING PAGE (served at root /) ──────────────────────────
+landing_dist_path = os.path.join(os.path.dirname(__file__), "../landing/dist")
+if os.path.exists(landing_dist_path):
+    # Serve static assets for landing page
+    app.mount("/assets", StaticFiles(directory=os.path.join(landing_dist_path, "assets")), name="landing_assets")
+    
+    @app.get("/", response_class=FileResponse)
+    async def serve_landing_root():
+        return FileResponse(os.path.join(landing_dist_path, "index.html"))
+    
+    @app.get("/{path:path}", response_class=FileResponse)
+    async def serve_landing_spa(path: str):
+        # Don't intercept API, app, or legal routes
+        if path.startswith("api/") or path.startswith("app/") or path in ("privacy", "terms", "dmca"):
+            raise StarletteHTTPException(status_code=404)
+        # Check if file exists (for assets), otherwise serve index.html
+        file_path = os.path.join(landing_dist_path, path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(landing_dist_path, "index.html"))
