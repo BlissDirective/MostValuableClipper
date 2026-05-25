@@ -3,11 +3,10 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
-from app.services.auth import get_current_user
+from app.services.auth import get_current_user, get_user_db
 from app.services.database import SupabaseService
 
 router = APIRouter(prefix="/users", tags=["users"])
-db = SupabaseService()
 
 class OnboardingUpdate(BaseModel):
     current_step: str
@@ -32,7 +31,10 @@ class BillingInfo(BaseModel):
     tax_id: Optional[str] = None
 
 @router.get("/me")
-async def get_current_user_profile(user = Depends(get_current_user)):
+async def get_current_user_profile(
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
+):
     """Get current user's profile."""
     try:
         profile = await db.get_profile(user.id)
@@ -66,7 +68,8 @@ async def get_current_user_profile(user = Depends(get_current_user)):
 @router.patch("/me")
 async def update_profile(
     update: UserProfileUpdate,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Update user profile."""
     try:
@@ -78,7 +81,10 @@ async def update_profile(
         raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")
 
 @router.get("/me/onboarding")
-async def get_onboarding_state(user = Depends(get_current_user)):
+async def get_onboarding_state(
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
+):
     """Get onboarding progress."""
     try:
         profile = await db.get_profile(user.id)
@@ -99,7 +105,8 @@ async def get_onboarding_state(user = Depends(get_current_user)):
 @router.post("/me/onboarding")
 async def update_onboarding(
     update: OnboardingUpdate,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Update onboarding progress."""
     try:
@@ -113,7 +120,10 @@ async def update_onboarding(
         raise HTTPException(status_code=500, detail=f"Failed to update onboarding: {str(e)}")
 
 @router.delete("/me")
-async def delete_account(user = Depends(get_current_user)):
+async def delete_account(
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
+):
     """Delete the current user account (soft delete)."""
     try:
         await db.delete_profile(user.id)
@@ -123,7 +133,10 @@ async def delete_account(user = Depends(get_current_user)):
 
 
 @router.get("/me/export")
-async def export_user_data(user = Depends(get_current_user)):
+async def export_user_data(
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
+):
     """Export all user data as JSON (GDPR/CCPA data portability)."""
     try:
         profile = await db.get_profile(user.id)
@@ -152,7 +165,10 @@ async def export_user_data(user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Failed to export data: {str(e)}")
 
 @router.get("/me/subscription")
-async def get_subscription(user = Depends(get_current_user)):
+async def get_subscription(
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
+):
     """Get current subscription details."""
     try:
         subscription = await db.get_subscription(user.id)
@@ -173,7 +189,10 @@ async def get_subscription(user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Failed to get subscription: {str(e)}")
 
 @router.get("/me/usage")
-async def get_usage(user = Depends(get_current_user)):
+async def get_usage(
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
+):
     """Get current month clip usage and quota."""
     try:
         subscription = await db.get_subscription(user.id)
@@ -203,7 +222,8 @@ async def get_usage(user = Depends(get_current_user)):
 @router.patch("/me/preferences")
 async def update_preferences(
     prefs: PreferencesUpdate,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Update user preferences (theme, notifications, privacy, editor defaults)."""
     try:
@@ -221,7 +241,10 @@ async def update_preferences(
 
 
 @router.get("/me/billing")
-async def get_billing_info(user = Depends(get_current_user)):
+async def get_billing_info(
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
+):
     """Get billing information for the current user."""
     try:
         subscription = await db.get_subscription(user.id)

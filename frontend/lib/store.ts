@@ -1,9 +1,24 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Linking } from 'react-native';
-import { setApiToken } from './api';
+import * as SecureStore from 'expo-secure-store';
+import { Platform, Linking } from 'react-native';
+import { setApiToken, setRefreshCallback } from './api';
 import { clipsApi, pipelinesApi, earningsApi } from './api';
 import { mapBackendToPipeline } from './mappers';
+
+// SecureStore is unavailable on web; fall back to AsyncStorage there.
+const secureSet = async (key: string, value: string) => {
+  if (Platform.OS === 'web') return AsyncStorage.setItem(key, value);
+  return SecureStore.setItemAsync(key, value);
+};
+const secureGet = async (key: string): Promise<string | null> => {
+  if (Platform.OS === 'web') return AsyncStorage.getItem(key);
+  return SecureStore.getItemAsync(key);
+};
+const secureDelete = async (key: string) => {
+  if (Platform.OS === 'web') return AsyncStorage.removeItem(key);
+  return SecureStore.deleteItemAsync(key);
+};
 
 export type PlatformKey = 'tiktok' | 'instagram' | 'youtube';
 
@@ -212,10 +227,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   checkSession: async () => {
     try {
-      const token = await AsyncStorage.getItem('auth_token');
+      const token = await secureGet('auth_token');
       const hasOnboarded = (await AsyncStorage.getItem('has_onboarded')) === 'true';
       if (token) {
         setApiToken(token);
+        // Wire up refresh callback so the API client can refresh the session
+        setRefreshCallback(async () => {
+          const refresh = await secureGet('refresh_token');
+          return refresh;
+        });
         set({ token, isAuthenticated: true, hasOnboarded, isLoading: false });
       } else {
         set({ isAuthenticated: false, hasOnboarded, isLoading: false });
@@ -227,9 +247,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signIn: async (email, password) => {
     const data = await authPost('/auth/login', { email, password });
-    const { access_token, user } = data;
+    const { access_token, refresh_token, user } = data;
     setApiToken(access_token);
-    await AsyncStorage.setItem('auth_token', access_token);
+    await secureSet('auth_token', access_token);
+    if (refresh_token) await secureSet('refresh_token', refresh_token);
+    setRefreshCallback(async () => secureGet('refresh_token'));
     set({ token: access_token, user, isAuthenticated: true });
   },
 
@@ -239,15 +261,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       password,
       full_name: fullName,
     });
-    const { access_token, user } = data;
+    const { access_token, refresh_token, user } = data;
     setApiToken(access_token);
-    await AsyncStorage.setItem('auth_token', access_token);
+    await secureSet('auth_token', access_token);
+    if (refresh_token) await secureSet('refresh_token', refresh_token);
+    setRefreshCallback(async () => secureGet('refresh_token'));
     set({ token: access_token, user, isAuthenticated: true, hasOnboarded: false });
   },
 
   doSignOut: () => {
     setApiToken(null);
-    AsyncStorage.removeItem('auth_token').catch(() => null);
+    secureDelete('auth_token').catch(() => null);
+    secureDelete('refresh_token').catch(() => null);
     set({
       token: null,
       user: null,
@@ -490,11 +515,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 }));
 
-// Restore persisted token on module load
-AsyncStorage.getItem('auth_token')
+// Restore persisted token on module load (uses SecureStore / AsyncStorage on web)
+secureGet('auth_token')
   .then((token) => {
     if (token) {
       setApiToken(token);
+      setRefreshCallback(async () => secureGet('refresh_token'));
       useAuthStore.setState({ token, isAuthenticated: true, isLoading: false });
     } else {
       useAuthStore.setState({ isAuthenticated: false, isLoading: false });

@@ -20,6 +20,52 @@ export function setApiToken(t: string | null) {
   _token = t;
 }
 
+// Callback supplied by store.ts so the API layer can retrieve the refresh token
+// and re-authenticate without importing the store (avoids circular deps).
+type RefreshCallback = () => Promise<string | null>;
+let _refreshCallback: RefreshCallback | null = null;
+export function setRefreshCallback(cb: RefreshCallback) {
+  _refreshCallback = cb;
+}
+
+let _isRefreshing = false;
+let _refreshWaiters: Array<(token: string | null) => void> = [];
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (_isRefreshing) {
+    // Queue callers while a refresh is in flight
+    return new Promise((resolve) => _refreshWaiters.push(resolve));
+  }
+  _isRefreshing = true;
+  try {
+    const refreshToken = await _refreshCallback?.();
+    if (!refreshToken) return null;
+
+    const res = await fetch(`${BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const newToken: string | null = data.access_token ?? null;
+    if (newToken) {
+      setApiToken(newToken);
+      // Persist back to SecureStore via the same callback infrastructure
+      // (store.ts handles persistence when setApiToken is called externally)
+    }
+    _refreshWaiters.forEach((r) => r(newToken));
+    return newToken;
+  } catch {
+    _refreshWaiters.forEach((r) => r(null));
+    return null;
+  } finally {
+    _isRefreshing = false;
+    _refreshWaiters = [];
+  }
+}
+
 /* ── Deduplication ── */
 const inFlight = new Map<string, Promise<any>>();
 function getDedupeKey(method: string, url: string, body?: string): string {
@@ -215,15 +261,32 @@ async function req<T = any>(
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (_token) headers['Authorization'] = `Bearer ${_token}`;
-  const res = await retryFetch(url, {
+  const fetchOpts = {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  };
+
+  let res = await retryFetch(url, fetchOpts);
+
+  // On 401, attempt a single token refresh and retry the original request
+  if (res.status === 401 && _refreshCallback) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` };
+      res = await retryFetch(url, { ...fetchOpts, headers: retryHeaders }, 0);
+    }
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     const e: any = new Error(err.detail ?? res.statusText);
+    e.status = res.status;
     e.detail = err.detail;
+    // On persistent 401 after refresh, signal the app to log out
+    if (res.status === 401) {
+      e.isAuthError = true;
+    }
     throw e;
   }
   const text = await res.text();

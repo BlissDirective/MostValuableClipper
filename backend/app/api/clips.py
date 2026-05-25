@@ -7,7 +7,7 @@ from app.models import (
     Platform, ClipEditRequest,
     RemixRequest, RemixResponse
 )
-from app.services.auth import get_current_user
+from app.services.auth import get_current_user, get_user_db
 from app.services.database import SupabaseService
 from app.services.queue import QueueService
 from app.services.scheduler import PostScheduler
@@ -35,7 +35,6 @@ class ScheduleRequest(BaseModel):
 class PostRequest(BaseModel):
     platforms: List[Platform]
 
-db = SupabaseService()
 queue = QueueService()
 scheduler = PostScheduler()
 r2 = R2Service()
@@ -53,7 +52,8 @@ async def list_clips(
     pipeline_id: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """List clips with optional filtering."""
     try:
@@ -79,7 +79,8 @@ async def list_clips(
 @router.get("/feed")
 async def get_clip_feed(
     limit: int = 10,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Get clips ready for approval (swipe deck feed)."""
     try:
@@ -95,7 +96,8 @@ async def get_clip_feed(
 @router.post("", response_model=Clip, status_code=status.HTTP_201_CREATED)
 async def create_clip(
     clip: ClipCreate,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Create a new clip and queue it for processing."""
     try:
@@ -120,13 +122,16 @@ async def create_clip(
 @router.get("/{clip_id}", response_model=Clip)
 async def get_clip(
     clip_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Get a specific clip by ID."""
     try:
         clip = await db.get_clip(clip_id)
         if not clip:
             raise HTTPException(status_code=404, detail="Clip not found")
+        if clip.get("user_id") != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
         return clip
     except HTTPException:
         raise
@@ -137,7 +142,8 @@ async def get_clip(
 async def update_clip(
     clip_id: str,
     update: ClipUpdate,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Update a clip."""
     try:
@@ -149,7 +155,8 @@ async def update_clip(
 @router.post("/{clip_id}/approve")
 async def approve_clip(
     clip_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Approve a clip for posting."""
     try:
@@ -162,7 +169,8 @@ async def approve_clip(
 async def reject_clip(
     clip_id: str,
     reason: Optional[str] = None,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Reject a clip."""
     try:
@@ -178,7 +186,8 @@ async def reject_clip(
 async def clip_action(
     clip_id: str,
     action: ClipActionRequest,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Perform an action on a clip (approve, reject, retry, delete)."""
     try:
@@ -211,7 +220,8 @@ async def clip_action(
 async def schedule_clip(
     clip_id: str,
     request: ScheduleRequest,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Schedule a clip for posting at a specific time."""
     try:
@@ -235,7 +245,8 @@ async def schedule_clip(
 async def post_clip(
     clip_id: str,
     request: PostRequest,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Post an approved clip to selected platforms immediately via Zernio.
     
@@ -319,7 +330,8 @@ async def post_clip(
 @router.post("/{clip_id}/download-url")
 async def get_download_url(
     clip_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Generate a presigned R2 URL for downloading a clip.
     
@@ -364,7 +376,8 @@ async def get_download_url(
 async def edit_clip(
     clip_id: str,
     request: ClipEditRequest,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Edit a clip with advanced FFmpeg processing.
     
@@ -426,7 +439,8 @@ async def edit_clip(
 @router.get("/{clip_id}/edit-status")
 async def get_edit_status(
     clip_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Get the status of a clip edit job."""
     try:
@@ -461,7 +475,8 @@ async def get_edit_status(
 async def remix_clip(
     clip_id: str,
     request: RemixRequest,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """AI-powered remix of an existing clip.
     
@@ -522,7 +537,8 @@ async def remix_clip(
 @router.get("/{clip_id}/remix-status")
 async def get_remix_status(
     clip_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Get the status of a clip remix job and any completed variants."""
     try:
@@ -573,7 +589,8 @@ async def get_remix_status(
 async def get_thumbnails(
     clip_id: str,
     count: int = 20,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Generate thumbnail frames for timeline scrubber.
     
@@ -627,13 +644,12 @@ async def create_ab_test(
     clip_id: str,
     variant_ids: List[str],
     user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
     platform: str = "tiktok",
     confidence_level: float = 0.95
 ):
     """Create an A/B test comparing original vs remix variants."""
     try:
-        db = SupabaseService()
-        
         # Verify original clip exists and belongs to user
         original = await db.get_clip(clip_id)
         if not original:
@@ -847,13 +863,14 @@ async def preview_music_mix(
     profile: str = "background",
     preview_duration: Optional[float] = None,
     custom_duck_factor: Optional[float] = None,
-    user=Depends(get_current_user)
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Generate a music-mixed preview of a clip.
-    
+
     Renders a preview video with background music mixed in using FFmpeg.
     The preview is stored in R2 and returned as a presigned URL.
-    
+
     Args:
         track_id: Music track ID from /music/tracks
         profile: Mix profile — prominent, background, intro_only, outro_only, build
@@ -861,8 +878,6 @@ async def preview_music_mix(
         custom_duck_factor: Optional — override profile ducking (0.0-1.0)
     """
     try:
-        db = SupabaseService()
-        
         clip = await db.get_clip(clip_id)
         if not clip:
             raise HTTPException(status_code=404, detail="Clip not found")
@@ -935,18 +950,17 @@ class EditAgentsResponse(BaseModel):
 async def run_edit_agents(
     clip_id: str,
     request: EditAgentsRequest,
-    user=Depends(get_current_user)
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Run selected Edit Swarm agents and return a merged edit recipe.
-    
+
     Agents analyze the clip and generate an edit recipe that can be
     applied via the standard /edit endpoint.
-    
+
     Available agents: sticker, transition, music, color, caption, pacing, thumbnail
     """
     try:
-        db = SupabaseService()
-        
         clip = await db.get_clip(clip_id)
         if not clip:
             raise HTTPException(status_code=404, detail="Clip not found")
@@ -979,16 +993,15 @@ async def run_edit_agents(
 @router.post("/{clip_id}/edit-analyze")
 async def analyze_clip_for_editing(
     clip_id: str,
-    user=Depends(get_current_user)
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Analyze a clip with all agents and return enhancement suggestions.
-    
+
     Returns per-agent analysis, cost estimates, and quality scores.
     Use this to decide which agents to run.
     """
     try:
-        db = SupabaseService()
-        
         clip = await db.get_clip(clip_id)
         if not clip:
             raise HTTPException(status_code=404, detail="Clip not found")

@@ -3,7 +3,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 
 from app.models import EarningsSummary
-from app.services.auth import get_current_user
+from app.services.auth import get_current_user, get_user_db
 from app.services.stripe_service import StripeService
 from app.services.database import SupabaseService
 
@@ -12,7 +12,6 @@ router = APIRouter(prefix="/earnings", tags=["earnings"])
 from app.services.earnings_service import earnings_service
 
 stripe_service = StripeService()
-db = SupabaseService()
 
 @router.get("")
 async def get_earnings(
@@ -110,7 +109,8 @@ async def get_earnings_dashboard(
 async def request_withdrawal(
     amount: float,
     method: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Request a payout/withdrawal."""
     try:

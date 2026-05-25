@@ -8,6 +8,13 @@ logger = logging.getLogger(__name__)
 async def startup_event():
     """Application startup: verify connections and critical config."""
     logger.info(f"Starting up MVC API — env={settings.APP_ENV}")
+
+    # Hard-fail if APP_SECRET is not set — all sessions are forgeable without it
+    if not settings.APP_SECRET:
+        raise RuntimeError(
+            "APP_SECRET must be set to a secure random value (e.g. openssl rand -hex 32). "
+            "Refusing to start without it."
+        )
     
     # Check critical configuration
     missing = settings.check_critical()
