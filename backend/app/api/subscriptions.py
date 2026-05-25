@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 
-from app.services.auth import get_current_user
+from app.services.auth import get_current_user, get_user_db
 from app.services.stripe_service import StripeService
 from app.core.config import settings
 
@@ -11,7 +11,6 @@ from app.services.database import SupabaseService
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
 stripe_service = StripeService()
-db = SupabaseService()
 
 TIER_PRICE_MAP = {
     "basic": settings.STRIPE_PRICE_BASIC,
@@ -21,7 +20,7 @@ TIER_PRICE_MAP = {
 }
 
 class CheckoutRequest(BaseModel):
-    tier: str
+    tier: Literal["basic", "pro", "premium", "enterprise"]
 
 class CheckoutResponse(BaseModel):
     checkout_url: str
@@ -74,7 +73,10 @@ async def create_portal(user=Depends(get_current_user)):
 
 
 @router.post("/cancel")
-async def cancel_subscription(user=Depends(get_current_user)):
+async def cancel_subscription(
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
+):
     """Cancel the current subscription at period end."""
     try:
         subscription = await db.get_subscription(user.id)

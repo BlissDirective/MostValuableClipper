@@ -91,43 +91,38 @@ class ClipProcessingPipeline:
         """Download source video."""
         logger.info(f"[Pipeline] Downloading source {state['source_id']}")
         state["status"] = "downloading"
-        
+
         try:
-            # Get source info from database
             source = await self.db.get_source(state["source_id"])
-            
             if not source:
                 raise Exception(f"Source {state['source_id']} not found")
-            
+
             source_url = source.get("source_url")
             source_type = source.get("source_type", "youtube")
-            
             if not source_url:
                 raise Exception(f"Source {state['source_id']} has no URL")
-            
-            # Create temp directory for processing
-            temp_dir = tempfile.mkdtemp(prefix=f"clip_{state['clip_id']}_")
+
+            # temp_dir was pre-created by process() via TemporaryDirectory (M-10)
+            temp_dir = state["metadata"]["temp_dir"]
             video_path = os.path.join(temp_dir, "source.mp4")
-            
-            # Download the video
+
             if source_type == "youtube":
                 await self.video_service.download_youtube(source_url, video_path)
             elif source_type in ["direct_url", "rss"]:
                 await self.video_service.download_direct(source_url, video_path)
             else:
                 raise Exception(f"Unsupported source type: {source_type}")
-            
+
             state["video_path"] = video_path
-            state["metadata"]["temp_dir"] = temp_dir
             state["metadata"]["source_url"] = source_url
             state["metadata"]["source_type"] = source_type
-            
+
             logger.info(f"[Pipeline] Video downloaded: {video_path}")
         except Exception as e:
             logger.error(f"[Pipeline] Download failed: {e}")
             state["error"] = str(e)
             state["status"] = "failed"
-        
+
         return state
     
     async def _extract_audio(self, state: ClipProcessingState) -> ClipProcessingState:
@@ -471,16 +466,8 @@ class ClipProcessingPipeline:
             except Exception as db_error:
                 logger.error(f"[Pipeline] Failed to update database: {db_error}")
         
-        # Cleanup temp files
-        try:
-            temp_dir = state["metadata"].get("temp_dir")
-            if temp_dir and os.path.exists(temp_dir):
-                import shutil
-                shutil.rmtree(temp_dir)
-                logger.info(f"[Pipeline] Cleaned up temp directory: {temp_dir}")
-        except Exception as cleanup_error:
-            logger.warning(f"[Pipeline] Cleanup failed: {cleanup_error}")
-        
+        # Temp directory cleanup is handled by the TemporaryDirectory context
+        # manager in process() — no manual shutil.rmtree needed here (M-10).
         return state
     
     def _should_proceed(self, state: ClipProcessingState) -> str:
@@ -492,50 +479,53 @@ class ClipProcessingPipeline:
         return safety
     
     async def process(self, clip_id: str, source_id: str, pipeline_id: str, user_id: str) -> Dict[str, Any]:
-        """Execute the full clip processing workflow."""
-        initial_state = ClipProcessingState(
-            clip_id=clip_id,
-            source_id=source_id,
-            pipeline_id=pipeline_id,
-            user_id=user_id,
-            video_path=None,
-            audio_path=None,
-            transcription=None,
-            segments=None,
-            generated_clips=None,
-            safety_result=None,
-            thumbnail_path=None,
-            status="starting",
-            error="",
-            metadata={}
-        )
-        
-        try:
-            result = await self.workflow.ainvoke(initial_state)
-            return {
-                "clip_id": clip_id,
-                "status": result["status"],
-                "error": result.get("error"),
-                "metadata": result["metadata"]
-            }
-        except Exception as e:
-            logger.error(f"[Pipeline] Workflow failed: {e}")
-            
-            # Update database with failure
+        """Execute the full clip processing workflow.
+
+        Uses TemporaryDirectory as a context manager so the working directory
+        is always cleaned up — even if the workflow raises an unhandled exception
+        (M-10).
+        """
+        with tempfile.TemporaryDirectory(prefix=f"clip_{clip_id}_") as temp_dir:
+            initial_state = ClipProcessingState(
+                clip_id=clip_id,
+                source_id=source_id,
+                pipeline_id=pipeline_id,
+                user_id=user_id,
+                video_path=None,
+                audio_path=None,
+                transcription=None,
+                segments=None,
+                generated_clips=None,
+                safety_result=None,
+                thumbnail_path=None,
+                status="starting",
+                error="",
+                metadata={"temp_dir": temp_dir},
+            )
+
             try:
-                await self.db.update_clip(clip_id, {
+                result = await self.workflow.ainvoke(initial_state)
+                return {
+                    "clip_id": clip_id,
+                    "status": result["status"],
+                    "error": result.get("error"),
+                    "metadata": result["metadata"],
+                }
+            except Exception as e:
+                logger.error(f"[Pipeline] Workflow failed: {e}")
+                try:
+                    await self.db.update_clip(clip_id, {
+                        "status": "failed",
+                        "error_message": str(e),
+                    })
+                except Exception:
+                    pass
+                return {
+                    "clip_id": clip_id,
                     "status": "failed",
-                    "error_message": str(e)
-                })
-            except Exception:
-                pass
-            
-            return {
-                "clip_id": clip_id,
-                "status": "failed",
-                "error": str(e),
-                "metadata": {}
-            }
+                    "error": str(e),
+                    "metadata": {},
+                }
 
 # Backward compatibility
 LangGraphService = ClipProcessingPipeline

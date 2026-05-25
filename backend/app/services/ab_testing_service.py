@@ -10,7 +10,7 @@ import logging
 import math
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import json
 
@@ -107,7 +107,7 @@ class ABTestingService:
         Returns:
             ABTest object
         """
-        test_id = f"abt_{original_clip_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        test_id = f"abt_{original_clip_id}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         
         variants = [
             VariantPerformance(variant_id=f"variant_{i}", clip_id=clip_id)
@@ -181,7 +181,7 @@ class ABTestingService:
         if test.status == TestStatus.PENDING:
             if all(v.views > 0 for v in test.variants):
                 test.status = TestStatus.RUNNING
-                test.started_at = datetime.utcnow()
+                test.started_at = datetime.now(timezone.utc)
         
         # Evaluate test
         await self._evaluate_test(test)
@@ -198,10 +198,10 @@ class ABTestingService:
         
         # Check timeout
         if test.started_at:
-            elapsed = datetime.utcnow() - test.started_at
+            elapsed = datetime.now(timezone.utc) - test.started_at
             if elapsed.total_seconds() > test.max_duration_hours * 3600:
                 test.status = TestStatus.TIMEOUT
-                test.ended_at = datetime.utcnow()
+                test.ended_at = datetime.now(timezone.utc)
                 test.winner_variant_id = self._select_best_variant(test, require_significance=False)
                 logger.info(f"[ABTest] Test {test.test_id} timed out after {test.max_duration_hours}h")
                 return
@@ -218,7 +218,7 @@ class ABTestingService:
         if best_variant:
             test.status = TestStatus.CONCLUSIVE
             test.winner_variant_id = best_variant
-            test.ended_at = datetime.utcnow()
+            test.ended_at = datetime.now(timezone.utc)
             logger.info(f"[ABTest] Test {test.test_id} concluded — winner: {best_variant}")
             
             # Feed results back into analytics
@@ -226,7 +226,7 @@ class ABTestingService:
         elif min_views >= self.MIN_VIEWS_PER_VARIANT * 3:
             # Enough data but no significance
             test.status = TestStatus.INCONCLUSIVE
-            test.ended_at = datetime.utcnow()
+            test.ended_at = datetime.now(timezone.utc)
             logger.info(f"[ABTest] Test {test.test_id} inconclusive")
     
     def _select_best_variant(
@@ -322,7 +322,7 @@ class ABTestingService:
                     min(winner.engagement_rate * 10, 1.0) * 0.25 +
                     min(winner.watch_time_seconds / 60, 1.0) * 0.15
                 ),
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat()
             }
             
             # Store in proven_hooks table or append to user profile

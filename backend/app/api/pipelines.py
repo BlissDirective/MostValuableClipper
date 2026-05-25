@@ -4,16 +4,15 @@ from typing import List, Optional
 from app.models import (
     Pipeline, PipelineCreate, PipelineUpdate, PipelineStatus
 )
-from app.services.auth import get_current_user
+from app.services.auth import get_current_user, get_user_db
 from app.services.database import SupabaseService
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 
-db = SupabaseService()
-
 @router.get("")
 async def list_pipelines(
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """List all pipelines for the current user."""
     try:
@@ -25,7 +24,8 @@ async def list_pipelines(
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_pipeline(
     pipeline: PipelineCreate,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Create a new content pipeline."""
     try:
@@ -45,7 +45,8 @@ async def create_pipeline(
 @router.get("/{pipeline_id}")
 async def get_pipeline(
     pipeline_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Get pipeline details."""
     try:
@@ -65,7 +66,8 @@ async def get_pipeline(
 async def update_pipeline(
     pipeline_id: str,
     update: PipelineUpdate,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Update pipeline settings."""
     try:
@@ -86,7 +88,8 @@ async def update_pipeline(
 @router.post("/{pipeline_id}/toggle")
 async def toggle_pipeline(
     pipeline_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Toggle pipeline between running and paused."""
     try:
@@ -109,7 +112,8 @@ async def toggle_pipeline(
 @router.delete("/{pipeline_id}")
 async def delete_pipeline(
     pipeline_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Delete a pipeline."""
     try:

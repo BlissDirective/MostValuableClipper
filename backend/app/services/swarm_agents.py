@@ -889,7 +889,7 @@ class SafetySwarmAgent:
 
 
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.services.database import supabase
 
@@ -934,7 +934,7 @@ class HooksAnalysisSwarmAgent:
             # Fetch clips
             try:
                 result = supabase.table("clips").select("*").eq("user_id", user_id).gte(
-                    "created_at", (datetime.utcnow() - timedelta(days=days)).isoformat()
+                    "created_at", (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
                 ).execute()
                 clips = result.data or []
             except Exception:

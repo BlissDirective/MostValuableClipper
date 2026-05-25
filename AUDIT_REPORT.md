@@ -538,4 +538,322 @@ All 18 backend modules verified with `py_compile`:
 
 ---
 
+---
+
+## 14. Deep Security, Infrastructure & Quality Audit (2026-05-25)
+
+> **Scope:** Auth security, API authorization, webhook hardening, SQL/RLS, agentic pipeline reliability, frontend token security, deployment hardening, web deploy readiness.
+> **Method:** Multi-agent parallel review covering backend API, database schema, swarm orchestration, frontend, and infra/deployment.
+
+---
+
+### 14.1 Severity Summary
+
+| Layer | CRITICAL | HIGH | MEDIUM | LOW | Total |
+|-------|----------|------|--------|-----|-------|
+| Backend Auth & API Security | 4 | 6 | 8 | 4 | 22 |
+| Database / SQL / RLS | 4 | 6 | 5 | 5 | 20 |
+| Agentic Orchestration | 3 | 6 | 6 | 4 | 19 |
+| Frontend / Auth / UX | 1 | 4 | 8 | 6 | 19 |
+| Deployment / Infrastructure | 8 | 8 | 8 | 8 | 34 |
+| **Total** | **20** | **30** | **35** | **27** | **112** |
+
+---
+
+### 14.2 CRITICAL — Fix Before Any Production Traffic
+
+#### [C-01] Instagram & TikTok Webhooks Have No Signature Verification
+- **Files:** `backend/app/api/webhooks.py:136-152` (TikTok POST), `webhooks.py:172-183` (Instagram GET verify)
+- **Issue:** Both endpoints accept payloads with zero HMAC/token verification. The Instagram GET verify endpoint at line 180-181 returns `hub_challenge` based solely on `hub_mode == "subscribe"` without checking `hub_verify_token` against any configured secret. The TikTok POST endpoint stores raw payloads without checking `X-TikTok-Signature`.
+- **Impact:** Anyone on the internet can inject fake webhook events, poison analytics, or trigger downstream actions.
+- **Fix:** Add `INSTAGRAM_WEBHOOK_VERIFY_TOKEN` env var; verify on GET. Add HMAC-SHA256 verification of `X-Hub-Signature-256` on POST. For TikTok add HMAC of request body against `TIKTOK_WEBHOOK_SECRET`. Reject non-matching requests with 403.
+
+#### [C-02] OAuth Callback Trusts User-Supplied `profileId`
+- **File:** `backend/app/api/social.py:130`
+- **Issue:** The OAuth callback extracts `user_id` from the untrusted `profileId` query parameter instead of the server-held OAuth state. An attacker who completes OAuth can change `profileId` to any other user's ID in the callback URL, connecting their social account to the victim's MVC account.
+- **Impact:** Full account takeover for social posting; attacker can post content as any user.
+- **Fix:** Generate a random `state` nonce before OAuth redirect; store `{nonce: user_id}` in Redis with 10-minute TTL. Validate and look up `state` in callback; never trust `profileId` from the URL.
+
+#### [C-03] `APP_SECRET` Has a Hardcoded Default
+- **File:** `backend/app/core/config.py:16`
+- **Issue:** `APP_SECRET: str = "change-me-in-production"`. If the env var is not overridden, the application starts with a known secret and all JWTs/sessions can be forged.
+- **Impact:** Complete authentication bypass for any attacker who knows the default.
+- **Fix:** Remove default value entirely. Add startup validation:
+  ```python
+  if not settings.APP_SECRET or settings.APP_SECRET == "change-me-in-production":
+      raise RuntimeError("APP_SECRET must be set to a secure random value")
+  ```
+
+#### [C-04] Service Role Key Used for All Database Operations — RLS Bypassed
+- **Files:** `backend/app/services/database.py:6`, `backend/app/services/auth.py:11`
+- **Issue:** `create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)` is the only Supabase client. This key bypasses all RLS policies. All user-data queries run with admin privileges.
+- **Impact:** A single bug in any query (e.g., missing `user_id` filter) leaks data from all users. RLS policies are theater.
+- **Fix:** Create a second `supabase_admin` client for true admin operations (migrations, service tasks). For user-request handlers, create a per-request client authenticated with the user's JWT token so RLS enforces isolation automatically.
+
+#### [C-05] Missing Security Headers — Entire API Exposed to Clickjacking/XSS
+- **File:** `backend/app/main.py:38-47`
+- **Issue:** No `X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`, `Content-Security-Policy`, or `Referrer-Policy` headers. CORS uses `allow_headers=["*"]` and `allow_methods=["*"]`.
+- **Impact:** Clickjacking, MIME sniffing, header injection, and cross-origin attacks.
+- **Fix:** Add `starlette-security-headers` or manual middleware; lock down CORS to exact domains and explicit headers/methods.
+
+#### [C-06] CORS Wildcard `*.fly.dev` Allows Any Fly Subdomain
+- **File:** `backend/app/core/config.py:20`
+- **Issue:** `allow_credentials=True` combined with `https://*.fly.dev` wildcard origin permits any Fly.io tenant (attacker-controlled subdomain) to make credentialed cross-origin requests.
+- **Impact:** CSRF attacks on all mutation endpoints from attacker-controlled Fly.io apps.
+- **Fix:** Replace with explicit origin list: `["https://mvc-backend.fly.dev", "https://mostvaluableclipper.com"]`.
+
+#### [C-07] Stripe Webhook Exception Swallows Signature Errors
+- **File:** `backend/app/api/webhooks.py:48-50`
+- **Issue:** A broad `except Exception` catches `stripe.error.SignatureVerificationError` and returns 400, identical to a valid-but-malformed event. Forged webhooks are silently discarded instead of rejected with 403.
+- **Impact:** Obscures active attacks; forged events could slip through on edge cases.
+- **Fix:**
+  ```python
+  except stripe.error.SignatureVerificationError:
+      raise HTTPException(status_code=403, detail="Invalid Stripe signature")
+  ```
+
+#### [C-08] `get_clip` Endpoint Has No Ownership Check
+- **File:** `backend/app/api/clips.py:120-134`
+- **Issue:** Authenticated users can fetch any clip by ID, regardless of ownership. No `clip.user_id == user.id` guard.
+- **Impact:** Any logged-in user can read all other users' clips, video URLs, captions, and metadata.
+- **Fix:** Add `if clip.get("user_id") != user.id: raise HTTPException(403)` immediately after the DB fetch.
+
+#### [C-09] RLS DELETE Policies Missing on A/B Test Tables
+- **File:** `docs/supabase_migrations/002_ab_testing.sql:69-92`
+- **Issue:** `ab_tests`, `proven_hooks`, and `clip_revisions` have SELECT/INSERT/UPDATE RLS policies but no DELETE policy. By default Supabase denies deletes when RLS is enabled — but the explicit omission suggests the policy intent was not fully specified and may be inconsistently applied.
+- **Impact:** If a bug grants delete access, any user can destroy any other user's A/B tests and revisions.
+- **Fix:** Add explicit DELETE policies for each table using `USING (user_id = auth.uid())`.
+
+#### [C-10] `uuid` Module Used But Not Imported in `content_agent.py`
+- **File:** `backend/app/agents/content_agent.py:624`
+- **Issue:** `uuid.uuid4().hex[:12]` called without `import uuid`. This is a runtime `NameError`.
+- **Impact:** Any code path that creates a clip proposal crashes the agent entirely.
+- **Fix:** Add `import uuid` to the imports section.
+
+---
+
+### 14.3 HIGH Severity
+
+#### [H-01] Error Messages Leak Internal Details Throughout API
+- **Files:** `backend/app/api/clips.py:77,118,134` and similar patterns across all API files
+- **Issue:** `detail=f"Failed to X: {str(e)}"` exposes database errors, third-party API payloads, and stack details to clients.
+- **Fix:** Log full errors server-side; return generic `"detail": "Request failed"` to clients. Map known exception types to safe messages.
+
+#### [H-02] No Ownership Enforcement on Resource Mutation (IDOR)
+- **Files:** `backend/app/api/clips.py` (delete, update, remix, etc.)
+- **Issue:** Several mutation endpoints do not verify that the target resource belongs to the requesting user.
+- **Fix:** Standardize a `require_ownership(resource, user)` helper and apply it to all resource fetch-before-mutate patterns.
+
+#### [H-03] `count` and Other Numeric Parameters Have No Upper Bounds
+- **File:** `backend/app/api/clips.py:573-600`
+- **Issue:** `count` parameter defaults to 20 with no `le=` constraint. Attacker can request 1,000,000 thumbnails/results.
+- **Fix:** `count: int = Query(20, ge=1, le=100)`. Apply same pattern to all list endpoints.
+
+#### [H-04] `asyncio.gather` Without `return_exceptions=True` in Swarm Orchestrator
+- **File:** `backend/app/services/swarm_orchestrator.py:1058-1059`
+- **Issue:** If one agent task raises an uncaught exception, the entire gather cancels remaining tasks without proper cleanup.
+- **Fix:** `results = await asyncio.gather(*tasks, return_exceptions=True)`. Filter exception instances from results and record them as failed agents.
+
+#### [H-05] Workers Use Unbounded `while True` Loops with No Circuit Breaker
+- **Files:** `backend/app/workers/unified_worker.py:71`, `backend/app/workers/clip_worker.py:70`
+- **Issue:** Workers loop indefinitely with no max-uptime, no health heartbeat, and no restart-on-hang mechanism.
+- **Fix:** Add cumulative uptime cap (e.g., restart after 6 hours) and a heartbeat timestamp written to Redis; configure Fly.io health checks to restart workers that miss heartbeats.
+
+#### [H-06] Batch Status Updates Are Not Atomic — Race Condition
+- **File:** `backend/app/services/swarm_batch_service.py:308-334`
+- **Issue:** Two separate DB writes for batch status within the same method. A crash between them leaves the batch in an inconsistent state.
+- **Fix:** Consolidate into a single upsert or use a Supabase RPC function to atomically update all fields.
+
+#### [H-07] OAuth Tokens Stored in Plaintext
+- **File:** `backend/app/api/social.py:147-151`
+- **Issue:** Social OAuth access tokens written directly to the database without encryption.
+- **Impact:** Database breach = full access to all connected social accounts.
+- **Fix:** Encrypt tokens at rest using `cryptography.fernet.Fernet` with a key derived from `APP_SECRET`.
+
+#### [H-08] `Dockerfile` Runs as Root — No Least-Privilege Container
+- **File:** `backend/Dockerfile`
+- **Issue:** No `USER` directive; container runs as root. Container escape grants host root.
+- **Fix:** Add at end of Dockerfile:
+  ```dockerfile
+  RUN addgroup --system app && adduser --system --ingroup app app
+  USER app:app
+  ```
+
+#### [H-09] Health Checks Return Hardcoded `"connected"` — Never Validates Real State
+- **File:** `backend/app/api/health.py:14-25`
+- **Issue:** Returns `{"database": "connected"}` as a static string. Fly.io marks the container healthy even if Supabase is unreachable.
+- **Fix:** Actually query Supabase in the health handler; catch exceptions and return 503.
+
+#### [H-10] Missing RLS on Base Tables (profiles, clips, pipelines, etc.)
+- **File:** `backend/supabase_schema.sql`
+- **Issue:** No `ENABLE ROW LEVEL SECURITY` or policies found for the core application tables. Service-role bypass (C-04) compounds this.
+- **Fix:** For every table add `ALTER TABLE X ENABLE ROW LEVEL SECURITY` and a minimum set of user-scoped policies for SELECT/INSERT/UPDATE/DELETE.
+
+#### [H-11] Auth Token Stored in Unencrypted `AsyncStorage`
+- **File:** `frontend/lib/store.ts:232`
+- **Issue:** `await AsyncStorage.setItem('auth_token', access_token)` stores the JWT in plain text on-device storage.
+- **Impact:** Compromised device, rooted Android, or app with storage permission → token theft.
+- **Fix:** Replace with `expo-secure-store` (iOS Keychain / Android Keystore). Drop `react-native-async-storage` dependency for auth tokens.
+
+#### [H-12] No Refresh Token Persistence — Silent Session Expiry
+- **File:** `frontend/lib/auth.ts:51,79`
+- **Issue:** `refresh_token` received from Supabase but never persisted. No `401` interceptor in `api.ts` triggers a refresh. Users are silently logged out when the access token expires.
+- **Fix:** Store refresh token in `expo-secure-store`. Add a 401 interceptor in `api.ts` that calls `supabase.auth.refreshSession()` and retries the request.
+
+---
+
+### 14.4 MEDIUM Severity
+
+#### [M-01] No CSRF Tokens on Mutation Endpoints
+- Wildcard CORS + `allow_credentials=True` without SameSite cookies creates CSRF exposure. Add `SameSite=Strict` or `Lax` to all cookies; consider double-submit cookie CSRF tokens for state-changing endpoints.
+
+#### [M-02] Rate Limiting Is IP-Based Only — No Per-User Enforcement
+- **File:** `backend/app/core/rate_limit.py:29`
+- Attackers from multiple IPs (or VPNs) bypass IP limits. Auth endpoints should also rate-limit per email address to prevent distributed credential stuffing.
+
+#### [M-03] Subscription `tier` Parameter Not Validated Against Enum
+- **File:** `backend/app/api/subscriptions.py:45`
+- User-supplied `tier` string is looked up in `TIER_PRICE_MAP` without validation. Add `Literal["basic", "pro", "enterprise"]` type annotation.
+
+#### [M-04] Missing `IN DELETE` Cascade Consistency in Schema
+- **File:** `docs/supabase_migrations/002_ab_testing.sql:9`
+- `pipeline_id` uses `ON DELETE SET NULL` while user FKs cascade. Clarify intent; orphaned A/B tests with `pipeline_id=NULL` are currently invisible in the UI.
+
+#### [M-05] Missing Composite Indexes for Common Query Patterns
+- **File:** `docs/supabase_migrations/002_ab_testing.sql`
+- Queries on `(user_id, status)` or `(user_id, platform)` lack composite indexes. Add: `CREATE INDEX idx_ab_tests_user_status ON ab_tests(user_id, status)`.
+
+#### [M-06] No Platform Enum Constraint on `platform TEXT` Columns
+- **File:** `docs/supabase_migrations/002_ab_testing.sql:11`
+- `platform TEXT NOT NULL DEFAULT 'tiktok'` accepts any string. Add `CHECK (platform IN ('tiktok','instagram','youtube','facebook'))`.
+
+#### [M-07] `swarm_batch_service.py` Budget Check Not Re-Verified Post-Execution
+- **File:** `backend/app/services/swarm_batch_service.py:272-274`
+- Concurrent batches can collectively exceed the daily budget because each checks independently at start. Add a post-execution atomic spend verification.
+
+#### [M-08] Deprecated `datetime.utcnow()` Used Throughout Orchestrator
+- **File:** `backend/app/services/swarm_orchestrator.py:135,242`
+- Mix of `datetime.utcnow()` (deprecated) and `datetime.now(timezone.utc)`. Standardize on the latter.
+
+#### [M-09] Temp Files Never Deleted After Music Upload
+- **File:** `backend/app/api/clips.py:795-798`
+- `f"/tmp/upload_{user.id}_{file.filename}"` created but never deleted. Add `try/finally` with `os.remove(temp_path)`.
+
+#### [M-10] `langgraph_service.py` Temp Directory Leaked
+- **File:** `backend/app/services/langgraph_service.py:108-110`
+- `tempfile.mkdtemp()` created but never cleaned up. Use `tempfile.TemporaryDirectory()` as a context manager.
+
+#### [M-11] Silent `.catch(() => null)` on Approve/Reject/Delete in Frontend Store
+- **File:** `frontend/lib/store.ts:302,309,314`
+- Failed API calls silently update local state without confirming server success. Remove `.catch(() => null)`; propagate errors and show toast feedback.
+
+#### [M-12] API Client Has No 401 Interceptor — Stale Tokens Persist
+- **File:** `frontend/lib/api.ts:201-231`
+- No centralized interceptor that catches 401 responses, triggers token refresh, and retries. Each consumer independently fails with no logout path.
+
+#### [M-13] `.env.production` Committed to Repository with Empty Supabase Keys
+- **File:** `frontend/.env.production`
+- File is tracked by git with `EXPO_PUBLIC_SUPABASE_URL=` empty. Even empty, this file confirms environment structure and the API URL is committed. Add to `.gitignore`.
+
+#### [M-14] `requirements.txt` Uses Unpinned Lower-Bounds — Untested Upgrades
+- **File:** `backend/requirements.txt`
+- `fastapi>=0.109.2`, `stripe>=8.4.0`, `langgraph>=0.2.0` etc. A fresh install could pull in breaking major versions. Pin to exact versions (`==`) in production; use `>=` only in development.
+
+---
+
+### 14.5 LOW Severity
+
+#### [L-01] No Request-ID Tracing Across Logs
+- No middleware generates a `X-Request-ID`. Correlating user reports to log lines is impossible in production. Add `uuid4` request ID middleware.
+
+#### [L-02] Health Check Grace Period Too Short for Cold Starts
+- **File:** `backend/fly.toml:16`
+- `grace_period = "5s"` is insufficient for Python cold start + Supabase connection establishment. Increase to `"15s"`.
+
+#### [L-03] No DDoS Protection — Backend Directly Internet-Facing
+- No Cloudflare or other WAF in front of Fly.io. Add Cloudflare proxy with rate limiting rules.
+
+#### [L-04] No Database Backup Policy Documented
+- No automated backup schedule configured for Supabase. Enable Supabase's PITR (Point-in-Time Recovery) for production.
+
+#### [L-05] `proven_hooks.test_id` and `ab_tests.pipeline_id` Missing FK Indexes
+- **File:** `docs/supabase_migrations/002_ab_testing.sql`
+- Add: `CREATE INDEX idx_ab_tests_pipeline ON ab_tests(pipeline_id)` and `CREATE INDEX idx_proven_hooks_test ON proven_hooks(test_id)`.
+
+#### [L-06] Logging at INFO Level for Expected No-Op Conditions
+- **File:** `backend/app/agents/content_agent.py:119,154,381`
+- "No fresh content found" and similar expected conditions logged at INFO inflate log volume. Use DEBUG.
+
+#### [L-07] Agent Cost Constants Are Hardcoded with No Version Date
+- **File:** `backend/app/services/swarm_config_service.py:28-40`
+- Hardcoded costs per agent type will silently drift from actual Anthropic pricing. Store costs in DB with effective dates.
+
+#### [L-08] `react-native` 0.81 + React 19.1 Compatibility Not Officially Validated
+- **File:** `frontend/package.json:43,45`
+- React 19 is not the officially supported React version for RN 0.81. Pin React to `18.3.x` until RN officially supports 19.
+
+---
+
+### 14.6 Deployment Readiness Checklist
+
+| Item | Status | Blocker? |
+|------|--------|----------|
+| Webhook signature verification (Instagram, TikTok) | ❌ Missing | **YES** |
+| OAuth state validation (social connect) | ❌ Missing | **YES** |
+| `APP_SECRET` hardcoded default removed | ❌ Not enforced | **YES** |
+| Ownership check on `get_clip` | ❌ Missing | **YES** |
+| Service role key limited to admin operations | ❌ All ops | **YES** |
+| Security headers middleware | ❌ Missing | **YES** |
+| CORS exact-origin list | ❌ Wildcard | **YES** |
+| `uuid` import in `content_agent.py` | ❌ Missing | **YES** |
+| RLS enabled on all base tables | ❌ Missing | YES |
+| Auth token in SecureStore (not AsyncStorage) | ❌ AsyncStorage | YES |
+| Refresh token persistence + 401 interceptor | ❌ Missing | YES |
+| Dockerfile non-root user | ❌ Runs as root | YES |
+| Health check actually validates DB | ❌ Hardcoded | NO |
+| Error messages don't leak internals | ❌ Leaking | NO |
+| `asyncio.gather(return_exceptions=True)` | ❌ Missing | NO |
+| Worker circuit breaker / heartbeat | ❌ Missing | NO |
+| Temp file cleanup (API + langgraph) | ❌ Missing | NO |
+| `datetime.utcnow()` → `datetime.now(tz.utc)` | ❌ Mixed | NO |
+| Composite DB indexes for common queries | ❌ Missing | NO |
+| `requirements.txt` exact-pinned | ❌ Ranges | NO |
+
+---
+
+### 14.7 Recommended Fix Order
+
+**Sprint 0 (Ship-blocker — fix before any real users):**
+1. [C-10] Add `import uuid` in `content_agent.py`
+2. [C-03] Remove `APP_SECRET` default; add startup assertion
+3. [C-04] Scope database client to user JWT for data queries
+4. [C-08] Add ownership check to `get_clip`
+5. [C-02] Implement OAuth `state` nonce flow; remove `profileId` trust
+6. [C-01] Implement Instagram/TikTok webhook signature verification
+7. [C-07] Separate `SignatureVerificationError` handler in Stripe webhook
+8. [C-05/C-06] Add security headers middleware; fix CORS to exact origins
+9. [H-11] Migrate auth token storage to `expo-secure-store`
+10. [H-12] Add refresh token persistence and 401 interceptor in `api.ts`
+
+**Sprint 1 (Security hardening):**
+11. [H-03] Add upper-bound Query constraints on all pagination/count params
+12. [H-04] Fix `asyncio.gather(return_exceptions=True)` in orchestrator
+13. [H-07] Encrypt OAuth tokens before DB storage
+14. [H-08] Add non-root `USER` in Dockerfile
+15. [H-09] Implement real dependency checks in health endpoint
+16. [H-10] Enable RLS + write policies for all base tables
+17. [C-09] Add DELETE RLS policies on A/B test migration tables
+18. [M-11] Replace silent `.catch(() => null)` with real error handling
+19. [M-09/M-10] Fix temp file leaks in clip upload and langgraph
+
+**Sprint 2 (Reliability & observability):**
+20. [H-05] Add worker circuit breaker + heartbeat
+21. [H-06] Atomic batch status update
+22. [M-02] Add per-email rate limiting on auth endpoints
+23. [M-08] Standardize `datetime.now(timezone.utc)` everywhere
+24. [L-01] Add request-ID tracing middleware
+25. [L-02] Increase Fly.io grace period to 15s
+
+---
+
 *End of Audit Report*

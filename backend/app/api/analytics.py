@@ -3,13 +3,12 @@ from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 
-from app.services.auth import get_current_user
-from app.services.database import SupabaseService, supabase
+from app.services.auth import get_current_user, get_user_db
+from app.services.database import SupabaseService
 from app.services.hook_analysis_service import hook_analysis_service
 from app.services.queue import CacheService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
-db = SupabaseService()
 cache = CacheService()
 
 ANALYTICS_CACHE_TTL = 300  # 5 minutes
@@ -34,7 +33,8 @@ class CaptionStylesResponse(BaseModel):
 @router.post("/events")
 async def track_event(
     event: EventPayload,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Track an analytics event."""
     try:
@@ -49,7 +49,7 @@ async def track_event(
         raise HTTPException(status_code=500, detail=f"Failed to track event: {str(e)}")
 
 @router.get("/dashboard")
-async def get_analytics_dashboard(user = Depends(get_current_user)):
+async def get_analytics_dashboard(user = Depends(get_current_user), db: SupabaseService = Depends(get_user_db)):
     """Get full analytics dashboard using database aggregation with Redis caching."""
     cache_key = f"analytics:dashboard:{user.id}"
     
@@ -75,7 +75,8 @@ async def get_analytics_dashboard(user = Depends(get_current_user)):
 async def get_pipeline_analytics(
     pipeline_id: str,
     days: int = 30,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Get analytics for a specific pipeline using database aggregation with caching."""
     try:
@@ -108,7 +109,8 @@ async def get_pipeline_analytics(
 @router.get("/hooks")
 async def get_hook_analysis(
     days: int = 30,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Get AI-powered hook archetype analysis for the user's clips.
 
@@ -166,7 +168,8 @@ def _classify_caption(caption: str, hashtags: List[str]) -> List[str]:
 @router.get("/caption-styles", response_model=CaptionStylesResponse)
 async def get_caption_style_analysis(
     days: int = 30,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Analyze caption performance by style category.
     
@@ -177,7 +180,7 @@ async def get_caption_style_analysis(
     try:
         # Fetch clips posted in the period
         since = datetime.now() - timedelta(days=days)
-        clips_res = supabase.table("clips")\
+        clips_res = db._db.table("clips")\
             .select("id, views, platform_posts, created_at")\
             .eq("user_id", user.id)\
             .eq("status", "posted")\
@@ -279,7 +282,7 @@ async def get_caption_style_analysis(
 
 
 @router.post("/cache/clear")
-async def clear_analytics_cache(user = Depends(get_current_user)):
+async def clear_analytics_cache(user = Depends(get_current_user), db: SupabaseService = Depends(get_user_db)):
     """Clear analytics cache for the current user."""
     try:
         await cache.delete(f"analytics:dashboard:{user.id}")

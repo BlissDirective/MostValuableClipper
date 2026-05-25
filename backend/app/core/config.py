@@ -13,11 +13,11 @@ class Settings(BaseSettings):
     # Application
     # ============================================
     APP_ENV: str = "development"
-    APP_SECRET: str = "change-me-in-production"
+    APP_SECRET: str = ""
     API_V1_PREFIX: str = "/api/v1"
-    
-    # CORS — comma-separated string for env compatibility
-    CORS_ORIGINS_STR: str = "http://localhost:3000,http://localhost:8081,https://*.fly.dev"
+
+    # CORS — comma-separated list; must be set explicitly in production
+    CORS_ORIGINS_STR: str = "http://localhost:3000,http://localhost:8081"
     
     @property
     def CORS_ORIGINS(self) -> List[str]:
@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     # Zernio (Unified Social API)
     # ============================================
     ZERNIO_API_KEY: Optional[str] = None
+
+    # ============================================
+    # Webhook Secrets (required to verify incoming webhooks)
+    # ============================================
+    INSTAGRAM_WEBHOOK_VERIFY_TOKEN: str = ""
+    INSTAGRAM_WEBHOOK_SECRET: str = ""
+    TIKTOK_WEBHOOK_SECRET: str = ""
 
     # ============================================
     # Social Platform OAuth (Phase 2 — optional)

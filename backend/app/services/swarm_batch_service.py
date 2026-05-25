@@ -12,7 +12,7 @@ import uuid
 import time
 import asyncio
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models import (
     SwarmBatchJob, SwarmBatchJobStatus, SwarmBatchClipResult,
@@ -307,18 +307,7 @@ class SwarmBatchService:
         
         # Update status to running
         batch_job.status = SwarmBatchJobStatus.running
-        batch_job.updated_at = datetime.utcnow()
-        try:
-            supabase.table("swarm_batch_jobs").update({
-                "status": "running",
-                "updated_at": batch_job.updated_at.isoformat(),
-            }).eq("batch_id", batch_id).execute()
-        except Exception as e:
-            logger.warning(f"[BatchService] Failed to update batch status: {e}")
-        
-        # Update status to running
-        batch_job.status = SwarmBatchJobStatus.running
-        batch_job.updated_at = datetime.utcnow()
+        batch_job.updated_at = datetime.now(timezone.utc)
         try:
             supabase.table("swarm_batch_jobs").update({
                 "status": "running",
@@ -439,7 +428,7 @@ class SwarmBatchService:
         batch_job.processed_clips = total_completed
         batch_job.failed_clips = total_failed
         batch_job.cost_cents = actual_cost
-        batch_job.completed_at = datetime.utcnow()
+        batch_job.completed_at = datetime.now(timezone.utc)
         batch_job.results_summary = {
             "total_clips": total_clips,
             "completed": total_completed,
@@ -955,7 +944,7 @@ class SwarmBatchService:
             
             supabase.table("swarm_batch_jobs").update({
                 "status": "cancelled",
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }).eq("batch_id", batch_id).execute()
             
             # Cancel any running tasks
@@ -1326,7 +1315,7 @@ class SwarmBatchService:
             "priority": priority,
             "shared_context": shared_context,
             "custom_options": custom_options,
-            "enqueued_at": datetime.utcnow().isoformat(),
+            "enqueued_at": datetime.now(timezone.utc).isoformat(),
         }
         
         try:

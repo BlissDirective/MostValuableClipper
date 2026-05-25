@@ -2,19 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 
 from app.models import Source, SourceCreate
-from app.services.auth import get_current_user
+from app.services.auth import get_current_user, get_user_db
 from app.services.database import SupabaseService
 from app.services.queue import QueueService
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
-db = SupabaseService()
 queue = QueueService()
 
 @router.get("")
 async def list_sources(
     pipeline_id: Optional[str] = None,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """List all video sources for the current user."""
     try:
@@ -30,7 +30,8 @@ async def list_sources(
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_source(
     source: SourceCreate,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Add a new video source."""
     try:
@@ -47,7 +48,8 @@ async def create_source(
 @router.get("/{source_id}")
 async def get_source(
     source_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Get a specific source."""
     try:
@@ -65,7 +67,8 @@ async def get_source(
 @router.delete("/{source_id}")
 async def delete_source(
     source_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Delete a source."""
     try:
@@ -85,7 +88,8 @@ async def delete_source(
 @router.post("/{source_id}/refresh")
 async def refresh_source(
     source_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Manually trigger a source refresh."""
     try:

@@ -15,14 +15,23 @@ from app.core.config import settings
 
 class VideoProcessingWorker:
     """Background worker that consumes the Redis queue and processes video jobs.
-    
+
     Listens on multiple queues:
     - video_processing: Edit, remix, thumbnail, post, segment analyze, transcribe jobs
     - swarm_batch: Batch swarm execution jobs
+
+    Circuit-breaker (H-05): after CIRCUIT_OPEN_THRESHOLD consecutive cycle-level
+    exceptions the worker pauses for CIRCUIT_COOLDOWN seconds before retrying.
+    This prevents a broken dependency (e.g. Redis unreachable) from spin-looping
+    and flooding logs.
     """
-    
+
     QUEUES = ["video_processing", "swarm_batch"]
-    
+
+    # Circuit-breaker thresholds
+    CIRCUIT_OPEN_THRESHOLD = 5   # consecutive failures before opening
+    CIRCUIT_COOLDOWN = 60        # seconds to stay open before half-open retry
+
     def __init__(self):
         self.queue = QueueService()
         self.cache = CacheService()
@@ -33,6 +42,10 @@ class VideoProcessingWorker:
         self.db = SupabaseService()
         self.running = False
         self.current_job: Optional[str] = None
+        # Circuit-breaker state
+        self._consecutive_failures: int = 0
+        self._circuit_open: bool = False
+        self._circuit_reopen_at: float = 0.0
     
     async def process_job(self, job: Dict[str, Any]) -> Dict[str, Any]:
         """Process a single job based on its type."""
@@ -301,21 +314,46 @@ class VideoProcessingWorker:
         return False
     
     async def run(self, poll_interval: float = 2.0):
-        """Main worker loop."""
+        """Main worker loop with circuit-breaker protection (H-05)."""
         self.running = True
         print(f"[{datetime.now().isoformat()}] Worker started. Listening on queues: {', '.join(self.QUEUES)}")
-        
+
         while self.running:
+            # Circuit-breaker: check if open
+            if self._circuit_open:
+                now = asyncio.get_event_loop().time()
+                if now < self._circuit_reopen_at:
+                    await asyncio.sleep(poll_interval)
+                    continue
+                # Half-open: allow one attempt
+                print(f"[{datetime.now().isoformat()}] Circuit half-open — attempting recovery")
+                self._circuit_open = False
+
             try:
                 processed = await self.run_single_cycle()
-                
+                # Success: reset failure counter
+                if self._consecutive_failures > 0:
+                    print(f"[{datetime.now().isoformat()}] Circuit closed after recovery")
+                self._consecutive_failures = 0
+
                 if not processed:
                     await asyncio.sleep(poll_interval)
-                    
+
             except Exception as e:
-                print(f"[{datetime.now().isoformat()}] Worker cycle error: {str(e)}")
+                self._consecutive_failures += 1
+                print(
+                    f"[{datetime.now().isoformat()}] Worker cycle error "
+                    f"(failure {self._consecutive_failures}/{self.CIRCUIT_OPEN_THRESHOLD}): {e}"
+                )
+                if self._consecutive_failures >= self.CIRCUIT_OPEN_THRESHOLD:
+                    self._circuit_open = True
+                    self._circuit_reopen_at = asyncio.get_event_loop().time() + self.CIRCUIT_COOLDOWN
+                    print(
+                        f"[{datetime.now().isoformat()}] Circuit OPEN — "
+                        f"pausing {self.CIRCUIT_COOLDOWN}s after {self._consecutive_failures} failures"
+                    )
                 await asyncio.sleep(poll_interval)
-        
+
         print(f"[{datetime.now().isoformat()}] Worker stopped.")
     
     def stop(self):
@@ -333,7 +371,11 @@ class VideoProcessingWorker:
             "running": self.running,
             "current_job": self.current_job,
             "queue_length": total_queue_length,
-            "worker_id": os.getpid()
+            "worker_id": os.getpid(),
+            "circuit_breaker": {
+                "open": self._circuit_open,
+                "consecutive_failures": self._consecutive_failures,
+            },
         }
 
 

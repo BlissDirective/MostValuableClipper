@@ -1,8 +1,9 @@
-# Environment
+# Environment — never commit real credentials (M-13)
 .env
 *.env
-env.var
+.env.*
 !.env.example
+env.var
 
 # Python
 __pycache__/

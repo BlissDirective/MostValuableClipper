@@ -1,16 +1,18 @@
+import os
+import secrets
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse
 from typing import Optional, List
 from pydantic import BaseModel
-import os
 
-from app.services.auth import get_current_user
+from app.services.auth import get_current_user, get_user_db
 from app.models import Platform
 from app.services.database import SupabaseService
 from app.services.zernio_service import ZernioService
+from app.services.queue import CacheService
+from app.core.encryption import encrypt_field, decrypt_field
 
 router = APIRouter(prefix="/social", tags=["social"])
-db = SupabaseService()
 
 class ConnectAccountRequest(BaseModel):
     platform: Platform
@@ -20,12 +22,6 @@ class ConnectAccountRequest(BaseModel):
 class ConnectManualRequest(BaseModel):
     platform: Platform
     handle: str
-
-class AccountResponse(BaseModel):
-    platform: str
-    handle: Optional[str]
-    follower_count: int
-    connected: bool
 
 class OAuthInitResponse(BaseModel):
     auth_url: str
@@ -39,59 +35,65 @@ try:
 except ValueError:
     zernio = None
 
-# OAuth callback redirect URL — configured via env or defaults to API base
-# In production, this should be your deployed API URL + /social/oauth/callback
-# The callback then redirects to the mobile app via deep link
+# Admin-scoped db for the callback (no user JWT available in callback)
+_admin_db = SupabaseService()
+_cache = CacheService()
+
 OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "http://localhost:8000")
 APP_DEEP_LINK_SCHEME = os.getenv("APP_DEEP_LINK_SCHEME", "myapp")
+_OAUTH_STATE_TTL = 600  # 10 minutes
+
+
+def _state_key(nonce: str) -> str:
+    return f"oauth_state:{nonce}"
+
 
 @router.get("/oauth/{platform}", response_model=OAuthInitResponse)
 async def get_oauth_url(
     platform: Platform,
-    user = Depends(get_current_user)
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
 ):
     """Get Zernio OAuth URL for a platform.
-    
-    Frontend should open `auth_url` in a browser/WebBrowser.
-    After user authorizes, Zernio redirects to our callback endpoint,
-    which stores the account and redirects back to the app.
+
+    Generates a cryptographic state nonce and stores it in Redis (TTL 10 min)
+    so the callback can verify which user initiated the OAuth flow — the
+    callback never trusts user-supplied identity parameters.
     """
     if not zernio:
         raise HTTPException(
             status_code=503,
-            detail="Zernio not configured. Set ZERNIO_API_KEY to enable social OAuth."
+            detail="Zernio not configured. Set ZERNIO_API_KEY to enable social OAuth.",
         )
-    
+
     try:
-        # Use user ID as the Zernio profile ID (or a dedicated profile ID if stored)
-        profile_id = user.id
-        
-        # Build callback URL — this is where Zernio redirects after OAuth
+        # Generate a secure random nonce and store user_id against it
+        nonce = secrets.token_urlsafe(32)
+        await _cache.set(_state_key(nonce), user.id, ttl_seconds=_OAUTH_STATE_TTL)
+
         redirect_url = f"{OAUTH_REDIRECT_BASE}/api/v1/social/oauth/callback"
-        
-        # Get OAuth URL from Zernio
+
         result = await zernio.get_oauth_url(
             platform=platform.value,
-            profile_id=profile_id,
-            redirect_url=redirect_url
+            profile_id=user.id,
+            redirect_url=redirect_url,
+            state=nonce,  # Zernio passes state back to our callback
         )
-        
+
         auth_url = result.get("authUrl") or result.get("auth_url") or result.get("url")
         if not auth_url:
-            raise HTTPException(
-                status_code=500,
-                detail="Zernio did not return an auth URL"
-            )
-        
+            raise HTTPException(status_code=500, detail="Zernio did not return an auth URL")
+
         return {
             "auth_url": auth_url,
             "platform": platform.value,
-            "message": f"Open this URL to connect your {platform.value} account."
+            "message": f"Open this URL to connect your {platform.value} account.",
         }
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get OAuth URL: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to initiate OAuth")
+
 
 @router.get("/oauth/callback")
 async def oauth_callback(
@@ -100,84 +102,85 @@ async def oauth_callback(
     accountId: Optional[str] = None,
     handle: Optional[str] = None,
     username: Optional[str] = None,
-    profileId: Optional[str] = None,
-    connected: Optional[str] = None,
+    state: Optional[str] = None,
     error: Optional[str] = None,
     error_description: Optional[str] = None,
 ):
     """Handle OAuth callback from Zernio.
-    
-    Zernio redirects here after the user completes authorization.
-    We store the connected account and redirect back to the mobile app.
+
+    The `state` parameter is a nonce generated in get_oauth_url and stored in
+    Redis. We look it up to determine the user — we never trust profileId or
+    any other user-supplied identity parameter in the callback URL.
     """
-    # Handle errors from Zernio
     if error:
-        # Redirect to app with error
         deep_link = f"{APP_DEEP_LINK_SCHEME}://social/callback?success=false&error={error}"
         return RedirectResponse(url=deep_link)
-    
+
+    # Validate the state nonce
+    if not state:
+        deep_link = f"{APP_DEEP_LINK_SCHEME}://social/callback?success=false&error=missing_state"
+        return RedirectResponse(url=deep_link)
+
+    user_id = await _cache.get(_state_key(state))
+    if not user_id:
+        deep_link = f"{APP_DEEP_LINK_SCHEME}://social/callback?success=false&error=invalid_state"
+        return RedirectResponse(url=deep_link)
+
+    # Consume the nonce — one-time use
+    await _cache.delete(_state_key(state))
+
+    if not accountId:
+        deep_link = f"{APP_DEEP_LINK_SCHEME}://social/callback?success=false&error=missing_params"
+        return RedirectResponse(url=deep_link)
+
+    detected_platform = platform or "unknown"
+    account_handle = handle or username or "unknown"
+
     try:
-        # Extract platform from query params or try to detect
-        detected_platform = platform
-        if not detected_platform:
-            # Try to infer from connected param or other indicators
-            detected_platform = "unknown"
-        
-        # Use handle or username
-        account_handle = handle or username or "unknown"
-        
-        # Get user ID from profileId (we used user.id as profile_id)
-        user_id = profileId
-        
-        if not user_id or not accountId:
-            deep_link = f"{APP_DEEP_LINK_SCHEME}://social/callback?success=false&error=missing_params"
-            return RedirectResponse(url=deep_link)
-        
-        # Store or update the social account
-        try:
-            # Check if account already exists
-            existing = await db.list_social_accounts(user_id)
-            target = next((a for a in existing if a.get("platform") == detected_platform), None)
-            
-            account_data = {
-                "user_id": user_id,
-                "platform": detected_platform,
-                "handle": account_handle,
-                "account_id": accountId,
-                "access_token": None,  # Zernio manages tokens
-                "follower_count": 0,
-                "connected_at": "now()",
-                "last_synced_at": "now()"
-            }
-            
-            if target:
-                # Update existing
-                await db.update_social_account(target.get("id"), {
+        existing = await _admin_db.list_social_accounts(user_id)
+        target = next((a for a in existing if a.get("platform") == detected_platform), None)
+
+        account_data = {
+            "user_id": user_id,
+            "platform": detected_platform,
+            "handle": account_handle,
+            "account_id": accountId,
+            "access_token": None,  # Zernio manages tokens server-side
+            "follower_count": 0,
+            "connected_at": "now()",
+            "last_synced_at": "now()",
+        }
+
+        if target:
+            await _admin_db.update_social_account(
+                target.get("id"),
+                {
                     "handle": account_handle,
                     "account_id": accountId,
                     "connected_at": "now()",
-                    "last_synced_at": "now()"
-                })
-            else:
-                # Create new
-                await db.create_social_account(account_data)
-        except Exception as db_err:
-            # Log but still redirect to app
-            print(f"[oauth_callback] DB error: {db_err}")
-        
-        # Redirect to app with success
-        deep_link = f"{APP_DEEP_LINK_SCHEME}://social/callback?success=true&platform={detected_platform}&handle={account_handle}"
-        return RedirectResponse(url=deep_link)
-        
-    except Exception as e:
-        deep_link = f"{APP_DEEP_LINK_SCHEME}://social/callback?success=false&error=server_error"
-        return RedirectResponse(url=deep_link)
+                    "last_synced_at": "now()",
+                },
+            )
+        else:
+            await _admin_db.create_social_account(account_data)
+    except Exception as db_err:
+        import logging
+        logging.getLogger(__name__).error(f"[oauth_callback] DB error: {db_err}")
+
+    deep_link = (
+        f"{APP_DEEP_LINK_SCHEME}://social/callback"
+        f"?success=true&platform={detected_platform}&handle={account_handle}"
+    )
+    return RedirectResponse(url=deep_link)
+
 
 @router.get("/accounts")
-async def list_connected_accounts(user = Depends(get_current_user)):
+async def list_connected_accounts(
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
+):
     """List all connected social accounts via Zernio."""
     try:
-        # If Zernio is configured, fetch live accounts from their API
         if zernio:
             try:
                 zernio_accounts = await zernio.list_connected_accounts()
@@ -185,22 +188,22 @@ async def list_connected_accounts(user = Depends(get_current_user)):
                     "accounts": [
                         {
                             "id": a.get("id"),
-                            "platform": ZernioService.map_zernio_to_platform(a.get("platform", "")),
+                            "platform": ZernioService.map_zernio_to_platform(
+                                a.get("platform", "")
+                            ),
                             "handle": a.get("handle"),
                             "follower_count": a.get("follower_count", 0),
                             "connected": a.get("status") == "active",
                             "created_at": a.get("created_at"),
-                            "connected_via": "zernio"
+                            "connected_via": "zernio",
                         }
                         for a in zernio_accounts
                     ],
-                    "source": "zernio"
+                    "source": "zernio",
                 }
-            except Exception as e:
-                # Fall back to database if Zernio API fails
+            except Exception:
                 pass
-        
-        # Fallback: get from database
+
         accounts = await db.list_social_accounts(user.id)
         return {
             "accounts": [
@@ -211,55 +214,51 @@ async def list_connected_accounts(user = Depends(get_current_user)):
                     "follower_count": a.get("follower_count", 0),
                     "connected": a.get("status") == "active",
                     "created_at": a.get("created_at"),
-                    "connected_via": "database"
+                    "connected_via": "database",
                 }
                 for a in accounts
             ],
-            "source": "database"
+            "source": "database",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list accounts: {str(e)}")
 
+
 @router.post("/connect")
 async def connect_account(
     request: ConnectAccountRequest,
-    user = Depends(get_current_user)
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
 ):
-    """Connect a new social media account via Zernio.
-    
-    If authorization_code is provided, Zernio handles OAuth flow.
-    Otherwise, account is stored as manual/BYOK for later token exchange.
-    """
+    """Connect a social account (manual / BYOK path)."""
     try:
-        # Store the connection request
         account = await db.create_social_account({
             "user_id": user.id,
             "platform": request.platform,
             "handle": request.handle,
             "status": "pending" if request.authorization_code else "active",
-            "auth_code": request.authorization_code,
+            # H-07: encrypt credential at rest
+            "auth_code": encrypt_field(request.authorization_code),
             "created_at": "now()",
-            "connected_via": "zernio" if request.authorization_code else "manual"
+            "connected_via": "zernio" if request.authorization_code else "manual",
         })
-        
         return {
-            "success": True, 
-            "platform": request.platform, 
+            "success": True,
+            "platform": request.platform,
             "account_id": account.get("id"),
-            "message": "Account connected." if not request.authorization_code else "Account queued for Zernio OAuth. User will complete auth in Zernio dashboard."
+            "message": "Account connected.",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to connect account: {str(e)}")
 
+
 @router.post("/connect-manual")
 async def connect_account_manual(
     request: ConnectManualRequest,
-    user = Depends(get_current_user)
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
 ):
-    """Manually connect a social account by handle (BYOK / manual entry).
-    
-    Used when OAuth is not available or user provides their own API keys.
-    """
+    """Manually connect a social account by handle."""
     try:
         account = await db.create_social_account({
             "user_id": user.id,
@@ -268,23 +267,24 @@ async def connect_account_manual(
             "status": "active",
             "auth_code": None,
             "created_at": "now()",
-            "connected_via": "manual"
+            "connected_via": "manual",
         })
-        
         return {
             "success": True,
             "platform": request.platform,
             "account_id": account.get("id"),
             "handle": request.handle,
-            "message": f"{request.platform} account @{request.handle} connected manually."
+            "message": f"{request.platform} account @{request.handle} connected manually.",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to connect account: {str(e)}")
 
+
 @router.delete("/{platform}")
 async def disconnect_account(
     platform: Platform,
-    user = Depends(get_current_user)
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
 ):
     """Disconnect a social media account."""
     try:
@@ -292,7 +292,6 @@ async def disconnect_account(
         target = next((a for a in accounts if a.get("platform") == platform), None)
         if not target:
             raise HTTPException(status_code=404, detail="Account not found")
-        
         success = await db.delete_social_account(target.get("id"))
         return {"success": success, "platform": platform}
     except HTTPException:
@@ -300,10 +299,12 @@ async def disconnect_account(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to disconnect account: {str(e)}")
 
+
 @router.get("/{platform}/metrics")
 async def get_platform_metrics(
     platform: Platform,
-    user = Depends(get_current_user)
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
 ):
     """Get metrics for a connected platform via Zernio."""
     try:
@@ -311,25 +312,18 @@ async def get_platform_metrics(
         target = next((a for a in accounts if a.get("platform") == platform), None)
         if not target:
             raise HTTPException(status_code=404, detail="Account not connected")
-        
-        # If Zernio is configured, fetch live metrics
+
         if zernio and target.get("zernio_account_id"):
             try:
                 metrics = await zernio.get_metrics(
                     account_id=target.get("zernio_account_id"),
                     since=None,
-                    until=None
+                    until=None,
                 )
-                return {
-                    "platform": platform,
-                    "handle": target.get("handle"),
-                    "metrics": metrics,
-                    "source": "zernio"
-                }
+                return {"platform": platform, "handle": target.get("handle"), "metrics": metrics, "source": "zernio"}
             except Exception:
                 pass
-        
-        # Fallback to database metrics
+
         return {
             "platform": platform,
             "handle": target.get("handle"),
@@ -337,75 +331,71 @@ async def get_platform_metrics(
                 "follower_count": target.get("follower_count", 0),
                 "total_posts": target.get("total_posts", 0),
                 "total_views": target.get("total_views", 0),
-                "engagement_rate": target.get("engagement_rate", 0)
+                "engagement_rate": target.get("engagement_rate", 0),
             },
-            "source": "database"
+            "source": "database",
         }
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get metrics: {str(e)}")
 
+
 @router.post("/post/{clip_id}")
 async def post_clip_to_social(
     clip_id: str,
     platforms: List[Platform],
-    user = Depends(get_current_user)
+    user=Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
 ):
     """Post a clip to social platforms via Zernio."""
     try:
-        # Get clip details
         clip = await db.get_clip(clip_id)
         if not clip:
             raise HTTPException(status_code=404, detail="Clip not found")
-        
         if clip.get("user_id") != user.id:
             raise HTTPException(status_code=403, detail="Not authorized")
-        
+
         video_url = clip.get("video_url")
         if not video_url:
             raise HTTPException(status_code=400, detail="Clip has no video URL")
-        
-        # Map platforms to Zernio format
-        zernio_platforms = [ZernioService.map_platform_to_zernio(p.value) for p in platforms]
-        
+
         if not zernio:
             raise HTTPException(
-                status_code=503, 
-                detail="Zernio not configured. Set ZERNIO_API_KEY to enable social posting."
+                status_code=503,
+                detail="Zernio not configured. Set ZERNIO_API_KEY to enable social posting.",
             )
-        
-        # Post via Zernio
+
+        zernio_platforms = [ZernioService.map_platform_to_zernio(p.value) for p in platforms]
         result = await zernio.post_clip(
             video_url=video_url,
             caption=clip.get("caption", ""),
             platforms=zernio_platforms,
-            hashtags=clip.get("tags", [])
+            hashtags=clip.get("tags", []),
         )
-        
-        # Update clip with post IDs
+
         platform_posts = {}
-        for platform_result in result.get("platforms", []):
-            platform_name = ZernioService.map_zernio_to_platform(platform_result.get("platform", ""))
-            platform_posts[platform_name] = {
-                "platform": platform_name,
-                "post_id": platform_result.get("post_id"),
-                "post_url": platform_result.get("post_url"),
-                "status": "posted" if platform_result.get("success") else "failed",
-                "metrics": {}
+        for pr in result.get("platforms", []):
+            pname = ZernioService.map_zernio_to_platform(pr.get("platform", ""))
+            platform_posts[pname] = {
+                "platform": pname,
+                "post_id": pr.get("post_id"),
+                "post_url": pr.get("post_url"),
+                "status": "posted" if pr.get("success") else "failed",
+                "metrics": {},
             }
-        
+
         await db.update_clip(clip_id, {
             "platform_posts": platform_posts,
             "status": "posted",
-            "posted_at": "now()"
+            "posted_at": "now()",
         })
-        
+
         return {
             "success": True,
             "clip_id": clip_id,
             "platforms": platform_posts,
-            "zernio_post_id": result.get("post_id")
+            "zernio_post_id": result.get("post_id"),
         }
     except HTTPException:
         raise

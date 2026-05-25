@@ -2,13 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
-from app.services.auth import get_current_user
-from app.services.database import SupabaseService, supabase
+from app.services.auth import get_current_user, get_user_db
+from app.services.database import SupabaseService
 from app.agents.content_agent import content_agent
 from app.agents.source_agent import source_agent
 
 router = APIRouter(prefix="/agents", tags=["agents"])
-db = SupabaseService()
 
 # ═══════════════════════════════════════════════════════════
 #  Content Discovery
@@ -21,19 +20,20 @@ class DiscoveryRequest(BaseModel):
 @router.post("/discover")
 async def run_discovery(
     req: DiscoveryRequest,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Trigger content discovery for a pipeline."""
     pipeline = await db.get_pipeline(req.pipeline_id)
     if not pipeline:
         raise HTTPException(status_code=404, detail="Pipeline not found")
-    
-    if pipeline.get("user_id") != user["id"]:
+
+    if pipeline.get("user_id") != user.id:
         raise HTTPException(status_code=403, detail="Not your pipeline")
-    
+
     result = await content_agent.run_content_discovery(
         pipeline_id=req.pipeline_id,
-        user_id=user["id"],
+        user_id=user.id,
         max_proposals=req.max_proposals
     )
     
@@ -42,15 +42,16 @@ async def run_discovery(
 @router.get("/discover/{pipeline_id}/status")
 async def get_discovery_status(
     pipeline_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Get latest discovery results for a pipeline."""
     pipeline = await db.get_pipeline(pipeline_id)
-    if not pipeline or pipeline.get("user_id") != user["id"]:
+    if not pipeline or pipeline.get("user_id") != user.id:
         raise HTTPException(status_code=403, detail="Not found")
-    
+
     # Get pending review clips (proposals)
-    result = supabase.table("clips")\
+    result = db._db.table("clips")\
         .select("*")\
         .eq("pipeline_id", pipeline_id)\
         .eq("status", "pending_review")\
@@ -78,15 +79,16 @@ class CreateSourceRequest(BaseModel):
 @router.post("/sources")
 async def create_source(
     req: CreateSourceRequest,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Create a new content source."""
     pipeline = await db.get_pipeline(req.pipeline_id)
-    if not pipeline or pipeline.get("user_id") != user["id"]:
+    if not pipeline or pipeline.get("user_id") != user.id:
         raise HTTPException(status_code=403, detail="Not your pipeline")
-    
+
     result = await source_agent.create_source(
-        user_id=user["id"],
+        user_id=user.id,
         pipeline_id=req.pipeline_id,
         source_type=req.source_type,
         url=req.url or "",
@@ -102,11 +104,12 @@ async def create_source(
 @router.get("/sources/{pipeline_id}")
 async def list_sources(
     pipeline_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """List all sources for a pipeline with health info."""
     pipeline = await db.get_pipeline(pipeline_id)
-    if not pipeline or pipeline.get("user_id") != user["id"]:
+    if not pipeline or pipeline.get("user_id") != user.id:
         raise HTTPException(status_code=403, detail="Not found")
     
     sources = await source_agent.list_pipeline_sources(pipeline_id)
@@ -148,11 +151,12 @@ async def delete_source(
 @router.get("/sources/{pipeline_id}/health")
 async def check_sources_health(
     pipeline_id: str,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Run health check on all pipeline sources."""
     pipeline = await db.get_pipeline(pipeline_id)
-    if not pipeline or pipeline.get("user_id") != user["id"]:
+    if not pipeline or pipeline.get("user_id") != user.id:
         raise HTTPException(status_code=403, detail="Not found")
     
     result = await source_agent.run_health_check_batch(pipeline_id=pipeline_id)
@@ -190,11 +194,12 @@ class ProposalActionRequest(BaseModel):
 @router.post("/proposals/action")
 async def proposal_action(
     req: ProposalActionRequest,
-    user = Depends(get_current_user)
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db)
 ):
     """Approve, reject, or edit a proposal."""
     clip = await db.get_clip(req.clip_id)
-    if not clip or clip.get("user_id") != user["id"]:
+    if not clip or clip.get("user_id") != user.id:
         raise HTTPException(status_code=403, detail="Not found")
     
     if clip.get("status") != "pending_review":
@@ -235,28 +240,28 @@ async def proposal_action(
 # ═══════════════════════════════════════════════════════════
 
 @router.get("/status")
-async def get_agent_status(user = Depends(get_current_user)):
+async def get_agent_status(user = Depends(get_current_user), db: SupabaseService = Depends(get_user_db)):
     """Get overall agent system status."""
     # Count active pipelines
-    pipeline_result = supabase.table("pipelines")\
+    pipeline_result = db._db.table("pipelines")\
         .select("id, status, last_discovery_run")\
-        .eq("user_id", user["id"])\
+        .eq("user_id", user.id)\
         .execute()
-    
+
     pipelines = pipeline_result.data or []
     active_pipelines = [p for p in pipelines if p.get("status") == "active"]
-    
+
     # Count pending proposals
-    proposals_result = supabase.table("clips")\
+    proposals_result = db._db.table("clips")\
         .select("id", count="exact")\
-        .eq("user_id", user["id"])\
+        .eq("user_id", user.id)\
         .eq("status", "pending_review")\
         .execute()
-    
+
     # Count sources
-    sources_result = supabase.table("sources")\
+    sources_result = db._db.table("sources")\
         .select("id, status")\
-        .eq("user_id", user["id"])\
+        .eq("user_id", user.id)\
         .execute()
     
     sources = sources_result.data or []

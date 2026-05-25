@@ -5,13 +5,63 @@ agent allocation across pool types, and tracks costs per pool type.
 """
 
 import logging
+import time
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models import SwarmConfig, SwarmTier, SwarmJob, SwarmAgentResult
 from app.services.database import supabase
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# L-07: DB-backed pricing cache
+# ---------------------------------------------------------------------------
+# Costs are loaded from the agent_pricing table (migration 006) and cached
+# in-process for _PRICING_CACHE_TTL seconds so every swarm call doesn't hit
+# the DB. Update prices by inserting new rows in agent_pricing — no deploy
+# required.
+_PRICING_CACHE_TTL = 300  # 5 minutes
+_pricing_cache: Dict[str, int] = {}
+_pricing_cache_at: float = 0.0
+
+# Hard-coded fallback — used when DB is unreachable and cache is cold.
+_FALLBACK_COSTS: Dict[str, int] = {
+    "hook": 5,
+    "remix": 20,
+    "post": 1,
+    "ab_test": 3,
+    "music_match": 2,
+    "thumbnail": 1,
+    "safety": 1,
+    "hooks_analysis": 8,
+    "segment_analyze": 5,
+    "edit": 15,
+    "batch": 3,
+    "content_discovery": 5,
+}
+
+
+def _get_pricing() -> Dict[str, int]:
+    """Return current pool → cost_cents mapping, refreshing from DB as needed."""
+    global _pricing_cache, _pricing_cache_at
+    now = time.monotonic()
+    if _pricing_cache and (now - _pricing_cache_at) < _PRICING_CACHE_TTL:
+        return _pricing_cache
+    try:
+        result = (
+            supabase.table("agent_pricing")
+            .select("pool_type, cost_cents")
+            .is_("effective_until", "null")
+            .execute()
+        )
+        if result.data:
+            _pricing_cache = {row["pool_type"]: row["cost_cents"] for row in result.data}
+            _pricing_cache_at = now
+            return _pricing_cache
+    except Exception as exc:
+        logger.warning("[SwarmConfig] Failed to load pricing from DB, using fallback: %s", exc)
+    return _FALLBACK_COSTS
 
 
 class SwarmConfigService:
@@ -25,19 +75,13 @@ class SwarmConfigService:
         SwarmTier.enterprise: 10,
     }
 
-    # Default costs per agent execution (cents)
-    DEFAULT_COSTS = {
-        "hook": 5,           # ~$0.05 per Claude call
-        "remix": 20,         # ~$0.20 per variant (FFmpeg + storage)
-        "post": 1,           # ~$0.01 per API call
-        "ab_test": 3,        # ~$0.03 per variant comparison
-        "music_match": 2,    # ~$0.02 per track match
-        "thumbnail": 1,      # ~$0.01 per thumbnail generation
-        "safety": 1,         # ~$0.01 per safety check
-        "hooks_analysis": 8, # ~$0.08 per analysis batch
-        "segment_analyze": 5, # ~$0.05 per segment strategy
-        "edit": 15,          # ~$0.15 per edit recipe
-    }
+    @property
+    def DEFAULT_COSTS(self) -> Dict[str, int]:  # noqa: N802 — keep old name for callers
+        return _get_pricing()
+
+    @staticmethod
+    def _cost_for(pool_type: str) -> int:
+        return _get_pricing().get(pool_type, _FALLBACK_COSTS.get(pool_type, 5))
 
     @staticmethod
     async def get_config(user_id: str) -> Optional[SwarmConfig]:
@@ -136,7 +180,7 @@ class SwarmConfigService:
             config.auto_balance_allocation()
             logger.warning(f"[SwarmConfig] Invalid allocation, reset to auto: {error}")
 
-        config.updated_at = datetime.utcnow()
+        config.updated_at = datetime.now(timezone.utc)
 
         try:
             supabase.table("swarm_configs").upsert(config.model_dump(mode="json")).execute()
@@ -177,7 +221,7 @@ class SwarmConfigService:
 
         config.agent_allocation = sanitized
         config.auto_balance = False
-        config.updated_at = datetime.utcnow()
+        config.updated_at = datetime.now(timezone.utc)
 
         try:
             supabase.table("swarm_configs").upsert(config.model_dump(mode="json")).execute()
@@ -209,7 +253,7 @@ class SwarmConfigService:
         """Get estimated costs per pool type based on current allocation."""
         costs = {}
         for pool, count in config.agent_allocation.items():
-            per_agent = SwarmConfigService.DEFAULT_COSTS.get(pool, 5)
+            per_agent = _cost_for(pool)
             costs[pool] = per_agent * count
         return costs
 
@@ -220,11 +264,11 @@ class SwarmConfigService:
         if not config or config.daily_budget_cents == 0:
             return True  # Unlimited budget
 
-        estimated_cost = SwarmConfigService.DEFAULT_COSTS.get(pool_type, 5) * agent_count
+        estimated_cost = _cost_for(pool_type) * agent_count
 
         # Get today's spend
         try:
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
             result = supabase.table("swarm_jobs").select("cost_cents") \
                 .eq("user_id", user_id) \
                 .gte("created_at", today_start) \
@@ -239,8 +283,48 @@ class SwarmConfigService:
     @staticmethod
     def estimate_cost(pool_type: str, agent_count: int) -> int:
         """Estimate cost in cents for a swarm execution."""
-        per_agent = SwarmConfigService.DEFAULT_COSTS.get(pool_type, 5)
+        per_agent = _cost_for(pool_type)
         return per_agent * agent_count
+
+    @staticmethod
+    async def audit_budget_post_execution(user_id: str, actual_cost_cents: int) -> None:
+        """Re-verify budget after execution and warn when the daily cap is breached (M-07).
+
+        The pre-execution check uses estimated cost; concurrent jobs can slip past
+        the guard together.  This post-execution audit detects the overrun and logs
+        a warning so ops can investigate and adjust tier limits.
+        """
+        try:
+            config = await SwarmConfigService.get_config(user_id)
+            if not config or config.daily_budget_cents == 0:
+                return  # Unlimited budget — nothing to audit
+
+            today_start = (
+                datetime.now(timezone.utc)
+                .replace(hour=0, minute=0, second=0, microsecond=0)
+                .isoformat()
+            )
+            result = (
+                supabase.table("swarm_jobs")
+                .select("cost_cents")
+                .eq("user_id", user_id)
+                .gte("created_at", today_start)
+                .execute()
+            )
+            total_spent = sum(j.get("cost_cents", 0) for j in (result.data or []))
+
+            if total_spent > config.daily_budget_cents:
+                overage = total_spent - config.daily_budget_cents
+                logger.warning(
+                    "[SwarmConfig] Daily budget breached for user %s: "
+                    "spent=%d limit=%d overage=%d (cents)",
+                    user_id,
+                    total_spent,
+                    config.daily_budget_cents,
+                    overage,
+                )
+        except Exception as exc:
+            logger.debug("[SwarmConfig] Post-execution budget audit failed: %s", exc)
 
 
 class SwarmJobService:
