@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 
 from app.services.auth import get_current_user, get_user_db
 from app.services.stripe_service import StripeService
@@ -20,7 +20,7 @@ TIER_PRICE_MAP = {
 }
 
 class CheckoutRequest(BaseModel):
-    tier: str
+    tier: Literal["basic", "pro", "premium", "enterprise"]
 
 class CheckoutResponse(BaseModel):
     checkout_url: str

@@ -144,6 +144,8 @@ class SwarmOrchestrator:
         }
         await self.job_service.update_job(job)
         await self.queue.mark_job_complete(job_id, job.model_dump(mode="json"))
+        # M-07: audit actual vs budgeted cost after recording the job
+        await self.config_service.audit_budget_post_execution(user_id, total_cost)
 
         return {
             "job_id": job_id,

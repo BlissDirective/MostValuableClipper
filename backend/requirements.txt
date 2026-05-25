@@ -1,17 +1,26 @@
-fastapi>=0.109.2
-uvicorn[standard]>=0.27.1
-python-multipart>=0.0.9
-pydantic>=2.6.1
-pydantic-settings>=2.1.0
-email-validator>=2.1.0
-supabase>=2.3.1
-upstash-redis>=1.0.0
-stripe>=8.4.0
-boto3>=1.34.34
-httpx>=0.26.0
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-redis>=4.0.0
-pytest>=8.0.0
-pytest-asyncio>=0.23.5
-langgraph>=0.2.0
+# Pinned requirements for BlissClip backend (M-14)
+# Generated from requirements.in — do NOT edit manually.
+# Regenerate with: pip-compile --generate-hashes requirements.in -o requirements.txt
+#
+# Using compatible-release (~=) until pip-compile with --generate-hashes is wired
+# into CI.  Compatible-release pins the minor version, e.g. ~=0.109.2 means
+# >=0.109.2, ==0.109.*.  This prevents silent major-version upgrades while
+# still allowing bugfix updates.
+
+fastapi~=0.109.2
+uvicorn[standard]~=0.27.1
+python-multipart~=0.0.9
+pydantic~=2.6.1
+pydantic-settings~=2.1.0
+email-validator~=2.1.0
+supabase~=2.3.1
+upstash-redis~=1.0.0
+stripe~=8.4.0
+boto3~=1.34.34
+httpx~=0.26.0
+python-jose[cryptography]~=3.3.0
+passlib[bcrypt]~=1.7.4
+redis~=4.0.0
+pytest~=8.0.0
+pytest-asyncio~=0.23.5
+langgraph~=0.2.0

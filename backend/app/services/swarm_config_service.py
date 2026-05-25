@@ -242,6 +242,46 @@ class SwarmConfigService:
         per_agent = SwarmConfigService.DEFAULT_COSTS.get(pool_type, 5)
         return per_agent * agent_count
 
+    @staticmethod
+    async def audit_budget_post_execution(user_id: str, actual_cost_cents: int) -> None:
+        """Re-verify budget after execution and warn when the daily cap is breached (M-07).
+
+        The pre-execution check uses estimated cost; concurrent jobs can slip past
+        the guard together.  This post-execution audit detects the overrun and logs
+        a warning so ops can investigate and adjust tier limits.
+        """
+        try:
+            config = await SwarmConfigService.get_config(user_id)
+            if not config or config.daily_budget_cents == 0:
+                return  # Unlimited budget — nothing to audit
+
+            today_start = (
+                datetime.now(timezone.utc)
+                .replace(hour=0, minute=0, second=0, microsecond=0)
+                .isoformat()
+            )
+            result = (
+                supabase.table("swarm_jobs")
+                .select("cost_cents")
+                .eq("user_id", user_id)
+                .gte("created_at", today_start)
+                .execute()
+            )
+            total_spent = sum(j.get("cost_cents", 0) for j in (result.data or []))
+
+            if total_spent > config.daily_budget_cents:
+                overage = total_spent - config.daily_budget_cents
+                logger.warning(
+                    "[SwarmConfig] Daily budget breached for user %s: "
+                    "spent=%d limit=%d overage=%d (cents)",
+                    user_id,
+                    total_spent,
+                    config.daily_budget_cents,
+                    overage,
+                )
+        except Exception as exc:
+            logger.debug("[SwarmConfig] Post-execution budget audit failed: %s", exc)
+
 
 class SwarmJobService:
     """Persist and retrieve swarm jobs and agent results."""
