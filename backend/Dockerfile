@@ -16,8 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend application
 COPY ${SOURCE_DIR}/ .
 
-# Run migrations on startup (optional, can be done separately)
-# RUN python -m app.migrations
+# Run as non-root user (H-08)
+RUN addgroup --system app && adduser --system --ingroup app app
+USER app:app
 
 EXPOSE 8000
 

@@ -116,9 +116,9 @@ interface AuthState {
   signUp: (email: string, password: string, fullName?: string) => Promise<void>;
   doSignOut: () => void;
   fetchClips: () => Promise<void>;
-  approveClip: (id: string) => void;
-  rejectClip: (id: string) => void;
-  deleteClip: (id: string) => void;
+  approveClip: (id: string) => Promise<void>;
+  rejectClip: (id: string) => Promise<void>;
+  deleteClip: (id: string) => Promise<void>;
 
   // Pipelines
   fetchPipelines: () => Promise<void>;
@@ -323,21 +323,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  approveClip: (id) => {
-    clipsApi.approve(id).catch(() => null);
+  approveClip: async (id) => {
+    const prev = get().clips;
     set((s) => ({
       clips: s.clips.map((c) => (c.id === id ? { ...c, state: 'posted' } : c)),
     }));
+    try {
+      await clipsApi.approve(id);
+    } catch (err) {
+      console.error('[store] approveClip failed:', err);
+      set({ clips: prev });
+      throw err;
+    }
   },
 
-  rejectClip: (id) => {
-    clipsApi.reject(id).catch(() => null);
+  rejectClip: async (id) => {
+    const prev = get().clips;
     set((s) => ({ clips: s.clips.filter((c) => c.id !== id) }));
+    try {
+      await clipsApi.reject(id);
+    } catch (err) {
+      console.error('[store] rejectClip failed:', err);
+      set({ clips: prev });
+      throw err;
+    }
   },
 
-  deleteClip: (id) => {
-    clipsApi.delete(id).catch(() => null);
+  deleteClip: async (id) => {
+    const prev = get().clips;
     set((s) => ({ clips: s.clips.filter((c) => c.id !== id) }));
+    try {
+      await clipsApi.delete(id);
+    } catch (err) {
+      console.error('[store] deleteClip failed:', err);
+      set({ clips: prev });
+      throw err;
+    }
   },
 
   fetchPipelines: async () => {

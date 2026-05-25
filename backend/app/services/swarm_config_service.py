@@ -6,7 +6,7 @@ agent allocation across pool types, and tracks costs per pool type.
 
 import logging
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models import SwarmConfig, SwarmTier, SwarmJob, SwarmAgentResult
 from app.services.database import supabase
@@ -136,7 +136,7 @@ class SwarmConfigService:
             config.auto_balance_allocation()
             logger.warning(f"[SwarmConfig] Invalid allocation, reset to auto: {error}")
 
-        config.updated_at = datetime.utcnow()
+        config.updated_at = datetime.now(timezone.utc)
 
         try:
             supabase.table("swarm_configs").upsert(config.model_dump(mode="json")).execute()
@@ -177,7 +177,7 @@ class SwarmConfigService:
 
         config.agent_allocation = sanitized
         config.auto_balance = False
-        config.updated_at = datetime.utcnow()
+        config.updated_at = datetime.now(timezone.utc)
 
         try:
             supabase.table("swarm_configs").upsert(config.model_dump(mode="json")).execute()
@@ -224,7 +224,7 @@ class SwarmConfigService:
 
         # Get today's spend
         try:
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
             result = supabase.table("swarm_jobs").select("cost_cents") \
                 .eq("user_id", user_id) \
                 .gte("created_at", today_start) \

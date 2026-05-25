@@ -7,6 +7,7 @@ with customizable agent allocation per pool type.
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
+from datetime import datetime, timezone
 
 from app.services.auth import get_current_user
 from app.services.swarm_orchestrator import SwarmOrchestrator, swarm_orchestrator
@@ -348,7 +349,7 @@ async def auto_balance_allocation(
     
     config.auto_balance = True
     config.auto_balance_allocation()
-    config.updated_at = __import__("datetime").datetime.utcnow()
+    config.updated_at = datetime.now(timezone.utc)
     
     try:
         supabase = __import__("app.services.database", fromlist=["supabase"]).supabase

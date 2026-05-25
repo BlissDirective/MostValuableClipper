@@ -6,6 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 import logging
 import os
+import uuid as _uuid
 
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -56,7 +57,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             )
         return response
 
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Propagate or generate X-Request-ID for distributed tracing (L-01)."""
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or str(_uuid.uuid4())
+        request.state.request_id = request_id
+        response: Response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
 # Middleware — order matters: outermost runs last on responses
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(RateLimitMiddleware)

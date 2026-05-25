@@ -125,8 +125,8 @@ class SupabaseService:
         return result.data if result.data else []
 
     async def count_clips_this_month(self, user_id: str) -> int:
-        from datetime import datetime
-        now = datetime.utcnow()
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
         start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         result = (
             self._db.table("clips")

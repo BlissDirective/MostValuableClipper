@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile
+import os
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
@@ -15,7 +16,7 @@ from app.services.r2_service import R2Service
 from app.services.zernio_service import ZernioService
 from app.services.ffmpeg_service import FFmpegEditService
 from app.services.music_library_service import music_library_service as music_library
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
@@ -50,8 +51,8 @@ except ValueError:
 async def list_clips(
     status: Optional[ClipStatus] = None,
     pipeline_id: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     user = Depends(get_current_user),
     db: SupabaseService = Depends(get_user_db)
 ):
@@ -78,7 +79,7 @@ async def list_clips(
 
 @router.get("/feed")
 async def get_clip_feed(
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=50),
     user = Depends(get_current_user),
     db: SupabaseService = Depends(get_user_db)
 ):
@@ -362,7 +363,7 @@ async def get_download_url(
         
         return {
             "url": url,
-            "expires_at": (datetime.utcnow() + timedelta(seconds=300)).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=300)).isoformat(),
             "filename": f"blissclip_{clip_id}.mp4",
             "content_type": "video/mp4",
         }
@@ -410,7 +411,7 @@ async def edit_clip(
             "source_url": clip.get("video_url"),
             "recipe": recipe_data,
             "status": "queued",
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
         
         job_id = await queue.enqueue("clip_edit", job_data)
@@ -507,7 +508,7 @@ async def remix_clip(
             "include_captions": request.include_captions,
             "output_format": request.output_format,
             "status": "queued",
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
         
         job_id = await queue.enqueue("clip_remix", job_data)
@@ -588,7 +589,7 @@ async def get_remix_status(
 @router.post("/{clip_id}/thumbnails")
 async def get_thumbnails(
     clip_id: str,
-    count: int = 20,
+    count: int = Query(20, ge=1, le=50),
     user = Depends(get_current_user),
     db: SupabaseService = Depends(get_user_db)
 ):
@@ -718,7 +719,7 @@ async def get_ab_test_status(
 async def list_ab_tests(
     user=Depends(get_current_user),
     status: Optional[str] = None,
-    limit: int = 20
+    limit: int = Query(20, ge=1, le=100)
 ):
     """List all A/B tests for the current user."""
     try:
@@ -812,18 +813,22 @@ async def upload_music_track(
         with open(temp_path, "wb") as f:
             content = await file.read()
             f.write(content)
-        
-        # Add to library
-        track = music_library.add_user_upload(
-            file_path=temp_path,
-            user_id=user.id,
-            title=title,
-            artist=artist,
-            genre=genre,
-            vibe=vibe,
-            license_type=license_type,
-        )
-        
+
+        try:
+            # Add to library
+            track = music_library.add_user_upload(
+                file_path=temp_path,
+                user_id=user.id,
+                title=title,
+                artist=artist,
+                genre=genre,
+                vibe=vibe,
+                license_type=license_type,
+            )
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
         return {
             "success": True,
             "track": music_library.get_track_info(track.id),

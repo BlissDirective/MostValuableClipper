@@ -13,7 +13,7 @@ import asyncio
 import uuid
 import time
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models import (
     SwarmJob, SwarmJobType, SwarmJobStatus,
@@ -132,7 +132,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(results) - len(completed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "clip_id": clip_id,
             "platform": platform,
@@ -239,7 +239,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(results) - len(completed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "clip_id": clip_id,
             "strategies_used": strategies[:len(agents)],
@@ -344,7 +344,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(failed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "clip_id": clip_id,
             "platforms": [a["platform"] for a in accounts],
@@ -437,7 +437,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(results) - len(completed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "test_id": test_id,
             "strategies_used": strategies,
@@ -526,7 +526,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(results) - len(completed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "clip_id": clip_id,
             "strategies_used": strategies,
@@ -610,7 +610,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(results) - len(completed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "clip_id": clip_id,
             "styles_used": styles,
@@ -696,7 +696,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(results) - len(completed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "clip_id": clip_id,
             "levels_used": levels,
@@ -786,7 +786,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(results) - len(completed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "clip_id": clip_id,
             "methods_used": methods,
@@ -871,7 +871,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(results) - len(completed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "clip_id": clip_id,
             "strategies_used": strategies,
@@ -955,7 +955,7 @@ class SwarmOrchestrator:
         job.completed_agents = len(completed)
         job.failed_agents = len(results) - len(completed)
         job.cost_cents = total_cost
-        job.completed_at = datetime.utcnow()
+        job.completed_at = datetime.now(timezone.utc)
         job.results_summary = {
             "clip_id": clip_id,
             "recipes_used": recipes,
@@ -1056,7 +1056,14 @@ class SwarmOrchestrator:
 
         # Run all agents concurrently
         tasks = [run_with_tracking(agent) for agent in agents]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Log any unexpected exceptions that weren't caught by run_with_tracking
+        import logging
+        _log = logging.getLogger(__name__)
+        for r in results:
+            if isinstance(r, BaseException):
+                _log.error(f"[SwarmOrchestrator] Unhandled agent exception: {r}", exc_info=r)
+        return [r for r in results if not isinstance(r, BaseException)]
 
     async def _run_post_agents(
         self,
@@ -1112,7 +1119,14 @@ class SwarmOrchestrator:
             hook_data = hooks[i] if hooks and i < len(hooks) else None
             tasks.append(run_with_tracking(agent, hook_data))
 
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Log any unexpected exceptions that weren't caught by run_with_tracking
+        import logging
+        _log = logging.getLogger(__name__)
+        for r in results:
+            if isinstance(r, BaseException):
+                _log.error(f"[SwarmOrchestrator] Unhandled agent exception: {r}", exc_info=r)
+        return [r for r in results if not isinstance(r, BaseException)]
 
     async def _run_music_agents(
         self,
@@ -1164,7 +1178,14 @@ class SwarmOrchestrator:
                 return result
 
         tasks = [run_with_tracking(agent) for agent in agents]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Log any unexpected exceptions that weren't caught by run_with_tracking
+        import logging
+        _log = logging.getLogger(__name__)
+        for r in results:
+            if isinstance(r, BaseException):
+                _log.error(f"[SwarmOrchestrator] Unhandled agent exception: {r}", exc_info=r)
+        return [r for r in results if not isinstance(r, BaseException)]
 
     # ─────────────────────────────────────────────────────────────
     # Helpers

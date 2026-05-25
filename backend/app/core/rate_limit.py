@@ -3,6 +3,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Dict, Optional
 import time
 import hashlib
+import json
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Custom rate limiting middleware with tiered limits per endpoint category.
@@ -25,6 +26,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     PUBLIC_LIMIT = 600
     WINDOW_SECONDS = 60
     
+    # Auth endpoints that support per-email limiting (M-02)
+    _AUTH_BODY_PATHS = {"/api/v1/auth/login", "/api/v1/auth/register"}
+
     # Endpoint category patterns
     AUTH_PATTERNS = ["/api/v1/auth/", "/api/v1/users/me/subscription"]
     EXPENSIVE_PATTERNS = ["/api/v1/swarm/", "/api/v1/clips/", "/api/v1/worker/"]
@@ -103,16 +107,62 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
         self._cleanup_last = now
     
+    async def _check_email_limit(self, request: Request, path: str) -> Optional[Response]:
+        """Per-email rate limit for login/register — prevents credential stuffing (M-02).
+
+        Starlette caches the body after the first read, so downstream handlers
+        can still consume it normally.
+        """
+        if path not in self._AUTH_BODY_PATHS:
+            return None
+        try:
+            body_bytes = await request.body()
+            body_json = json.loads(body_bytes)
+            email = str(body_json.get("email", "")).lower().strip()
+            if not email:
+                return None
+        except Exception:
+            return None
+
+        email_key = "email:" + hashlib.sha256(email.encode()).hexdigest()[:24]
+        now = time.time()
+        window_start = now - self.WINDOW_SECONDS
+
+        if email_key not in self._requests:
+            self._requests[email_key] = []
+
+        recent = [t for t in self._requests[email_key] if t > window_start]
+        if len(recent) >= self.AUTH_LIMIT:
+            retry_after = int(self.WINDOW_SECONDS - (now - recent[0]))
+            return Response(
+                content='{"detail":"Too many attempts for this account. Please try again later."}',
+                status_code=429,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-RateLimit-Limit": str(self.AUTH_LIMIT),
+                    "X-RateLimit-Remaining": "0",
+                    "Retry-After": str(max(1, retry_after)),
+                },
+            )
+
+        self._requests[email_key].append(now)
+        return None
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        
+
         # Skip rate limiting for exempt paths
         if self._is_exempt(path):
             return await call_next(request)
-        
+
         # Periodic cleanup
         self._cleanup_old_entries()
-        
+
+        # Per-email check on auth endpoints (M-02)
+        email_limited = await self._check_email_limit(request, path)
+        if email_limited is not None:
+            return email_limited
+
         client_key = self._get_client_key(request)
         limit = self._get_limit(path)
         

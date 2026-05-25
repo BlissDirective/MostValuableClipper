@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.services.auth import get_current_user, get_user_db
 from app.services.database import SupabaseService
@@ -157,7 +157,7 @@ async def export_user_data(
             "clips": clips.get("items", []),
             "sources": sources.get("items", []),
             "subscription": subscription,
-            "export_generated_at": datetime.utcnow().isoformat(),
+            "export_generated_at": datetime.now(timezone.utc).isoformat(),
         }
         
         return export_data
