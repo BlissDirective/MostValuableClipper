@@ -104,6 +104,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         content={"detail": exc.detail},
     )
 
+# M-01 (CSRF): This API uses JWT Bearer token auth — credentials are sent in
+# Authorization headers, not cookies. Browsers never auto-attach Bearer tokens
+# cross-origin, so CSRF is not applicable. The CORS origin whitelist provides
+# additional defence-in-depth. No CSRF tokens needed.
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error("Unhandled exception at %s: %s", request.url.path, exc, exc_info=True)
