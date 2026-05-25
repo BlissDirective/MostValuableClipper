@@ -333,7 +333,7 @@ class ContentAgent:
             duration = info.get("duration", 0) if info else content_item.get("duration", 0)
             
             if duration < self.MIN_DURATION:
-                logger.info(f"[ContentAgent] Video too short ({duration}s), skipping: {video_url}")
+                logger.debug("[ContentAgent] Video too short (%ss), skipping: %s", duration, video_url)
                 return []
             
             # Step 2: Transcribe for text-based signals
@@ -809,7 +809,7 @@ class ContentAgent:
         fresh_items = await self.scan_pipeline_sources(pipeline_id)
         
         if not fresh_items:
-            logger.info(f"[ContentAgent] No fresh content found for pipeline {pipeline_id}")
+            logger.debug("[ContentAgent] No fresh content found for pipeline %s", pipeline_id)
             return {
                 "success": True,
                 "pipeline_id": pipeline_id,

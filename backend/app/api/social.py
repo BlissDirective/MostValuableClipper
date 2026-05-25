@@ -10,6 +10,7 @@ from app.models import Platform
 from app.services.database import SupabaseService
 from app.services.zernio_service import ZernioService
 from app.services.queue import CacheService
+from app.core.encryption import encrypt_field, decrypt_field
 
 router = APIRouter(prefix="/social", tags=["social"])
 
@@ -236,7 +237,8 @@ async def connect_account(
             "platform": request.platform,
             "handle": request.handle,
             "status": "pending" if request.authorization_code else "active",
-            "auth_code": request.authorization_code,
+            # H-07: encrypt credential at rest
+            "auth_code": encrypt_field(request.authorization_code),
             "created_at": "now()",
             "connected_via": "zernio" if request.authorization_code else "manual",
         })
