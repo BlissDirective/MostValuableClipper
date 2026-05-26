@@ -1074,10 +1074,10 @@ async def generate_hooks_llm(
     platform: str = "tiktok"
 ):
     """
-    Generate viral hooks using Claude LLM.
+    Generate viral hooks using tiered LLM routing.
     
-    This endpoint is useful for testing the LLM hook generation
-    without going through the full remix pipeline.
+    Automatically routes to the most cost-effective model for the
+    task (PREMIUM tier: Claude Sonnet 4.6, GPT-5.4, etc.)
     """
     try:
         # Get user's top archetypes
@@ -1091,13 +1091,17 @@ async def generate_hooks_llm(
         except Exception:
             pass
         
-        # Generate hooks
+        # Generate hooks via LLMRouter (auto-routes to best model)
         hooks = await claude_hook_service.generate_hooks(
             transcript_text=transcript,
             user_top_archetypes=user_top_archetypes,
             num_variants=num_variants,
             platform=platform
         )
+        
+        # Report actual model used and cost from the router
+        model_used = claude_hook_service.last_model_used or "fallback"
+        cost_usd = claude_hook_service.last_cost_usd
         
         return {
             "success": True,
@@ -1113,7 +1117,8 @@ async def generate_hooks_llm(
                 for h in hooks
             ],
             "user_top_archetypes": user_top_archetypes,
-            "model_used": "claude-sonnet-4-20250514" if claude_hook_service.api_key else "fallback"
+            "model_used": model_used,
+            "cost_usd": round(cost_usd, 6),
         }
         
     except Exception as e:
