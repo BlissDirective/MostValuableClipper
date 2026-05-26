@@ -59,10 +59,13 @@ class Settings(BaseSettings):
     STRIPE_PRICE_ENTERPRISE: str = ""
     
     # ============================================
-    # AI / LLM (Optional — will warn if missing)
+    # AI / LLM Router — Multi-Provider (Optional)
     # ============================================
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
+    GROQ_API_KEY: Optional[str] = None
+    DEEPSEEK_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
     
     # ============================================
     # Zernio (Unified Social API)
