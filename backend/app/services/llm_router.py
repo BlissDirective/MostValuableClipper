@@ -370,6 +370,20 @@ TASK_MODEL_MAP: Dict[str, Dict[str, Any]] = {
         "rationale": "Hook analysis combines metrics + creativity assessment. Standard.",
         "cost_reduction_vs_baseline": 0.75,
     },
+    # Title generation - STANDARD: needs click-worthy creativity
+    "title_generate": {
+        "tier": ModelTier.STANDARD,
+        "models": ["gpt-5.4-mini", "claude-haiku-4.5", "deepseek-v4-flash"],
+        "rationale": "Titles need click-worthy creativity but are short. Standard tier optimal.",
+        "cost_reduction_vs_baseline": 0.78,
+    },
+    # Content moderation classification - ECONOMY: binary classification
+    "moderation_classify": {
+        "tier": ModelTier.ECONOMY,
+        "models": ["gpt-4.1-nano", "groq-llama-8b"],
+        "rationale": "Moderation is binary/multiclass classification. Economy tier sufficient.",
+        "cost_reduction_vs_baseline": 0.95,
+    },
 }
 
 
