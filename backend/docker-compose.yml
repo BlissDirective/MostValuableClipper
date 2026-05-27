@@ -1,0 +1,191 @@
+# =============================================================================
+# MVC Local Development — Multi-Worker Orchestration
+# Run: docker compose up --scale ai-worker=4 --scale ffmpeg-worker=2
+# =============================================================================
+version: "3.8"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Redis — task broker and result backend
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # API — FastAPI application (no clip processing)
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/mvc
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+
+  # ---------------------------------------------------------------------------
+  # AI Workers — handle transcribe, safety, enrich, and all swarm agents
+  # Scales horizontally: docker compose up --scale ai-worker=N
+  # ---------------------------------------------------------------------------
+  ai-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_QUEUES=pipeline.transcribe,pipeline.safety,pipeline.enrich,swarm.hooks,swarm.post,swarm.ab_test,swarm.music,swarm.thumbnail,swarm.safety,swarm.segment,swarm.edit
+      - CELERY_CONCURRENCY=20
+      - WORKER_TYPE=ai
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # FFmpeg Workers — CPU-bound video processing
+  # Low concurrency (2-4) due to CPU intensity
+  # ---------------------------------------------------------------------------
+  ffmpeg-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_QUEUES=pipeline.generate,pipeline.thumbnail
+      - CELERY_CONCURRENCY=2
+      - WORKER_TYPE=ffmpeg
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /tmp/mvc:/tmp/mvc
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # I/O Workers — download and upload operations
+  # High concurrency (30) since these are network-bound
+  # ---------------------------------------------------------------------------
+  io-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_QUEUES=pipeline.download,pipeline.upload
+      - CELENCY_CONCURRENCY=30
+      - WORKER_TYPE=io
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /tmp/mvc:/tmp/mvc
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Celery Beat — periodic task scheduler
+  # ---------------------------------------------------------------------------
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: celery -A app.core.celery_config.celery_app beat -l info --scheduler celery.beat.PersistentScheduler -s /tmp/celerybeat-schedule
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Flower — Celery monitoring dashboard
+  # Access at: http://localhost:5555
+  # ---------------------------------------------------------------------------
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A app.core.celery_config.celery_app flower --port=5555 --broker_api=redis://redis:6379/0
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — local database (optional, can use Supabase instead)
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=mvc
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  redis_data:
+  postgres_data:

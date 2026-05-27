@@ -1,0 +1,56 @@
+# =============================================================================
+# Celery Worker Dockerfile — used by all worker types
+# Build context: backend/ (where requirements.txt lives)
+# =============================================================================
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies (FFmpeg for video workers)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY app/ ./app/
+
+# Environment
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+# Worker configuration (overridable at runtime)
+ENV REDIS_URL=redis://localhost:6379/0
+ENV CELERY_QUEUES=pipeline.download
+ENV CELERY_CONCURRENCY=10
+ENV WORKER_TYPE=general
+ENV CELERY_LOG_LEVEL=info
+
+# Graceful shutdown on SIGTERM
+STOPSIGNAL SIGTERM
+
+# Health check — verify worker is processing
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "
+import sys, os, redis, json
+r = redis.from_url(os.environ.get('REDIS_URL', 'redis://localhost:6379/0'))
+try:
+    r.ping()
+    sys.exit(0)
+except:
+    sys.exit(1)
+"
+
+# Default: Celery worker (overridden by docker-compose per service)
+CMD celery -A app.core.celery_config.celery_app worker \
+    -Q ${CELERY_QUEUES} \
+    -c ${CELERY_CONCURRENCY} \
+    -l ${CELERY_LOG_LEVEL} \
+    -n ${WORKER_TYPE}-worker@%h \
+    --without-gossip \
+    --without-mingle \
+    --without-heartbeat
