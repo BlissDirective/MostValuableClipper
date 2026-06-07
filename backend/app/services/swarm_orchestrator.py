@@ -118,14 +118,33 @@ class SwarmOrchestrator:
         results = await self._run_agents(agents, job_id, clip_id, platform, user_id)
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Pick best hook (highest estimated retention)
+        # PIVOT Fix 3: rank by the user's *real* historical persona performance
+        # when we have enough signal; otherwise fall back to the model's
+        # self-reported estimated_retention. This turns "best-pick" from a
+        # fabricated guess into a learned, per-user signal (the moat).
         completed = [r for r in results if r.status == "completed" and r.data]
+        best = None
         best_hook = None
+        ranked_by = "estimate"
         if completed:
-            best = max(completed, key=lambda r: r.data.get("estimated_retention", 0))
+            persona_scores = await self.config_service.get_persona_performance(
+                user_id, "hook", platform
+            )
+
+            def _rank(r):
+                hist = persona_scores.get(r.persona)
+                # Blend: trust history when present, else the model estimate.
+                model_est = r.data.get("estimated_retention", 0) or 0
+                return hist if hist is not None else model_est
+
+            best = max(completed, key=_rank)
             best_hook = best.data
+            # Only claim "history" if the winning persona had real outcome data.
+            if persona_scores.get(best.persona) is not None:
+                ranked_by = "history"
 
         total_cost = sum(r.cost_cents for r in results)
+        total_cost_usd = round(sum(getattr(r, "cost_usd", 0.0) for r in results), 6)
 
         # Update job
         job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
@@ -153,6 +172,8 @@ class SwarmOrchestrator:
             "results": [self._serialize_result(r) for r in results],
             "best_hook": best_hook,
             "total_cost_cents": total_cost,
+            "total_cost_usd": total_cost_usd,
+            "ranked_by": ranked_by,
             "duration_ms": duration_ms,
         }
 
@@ -292,6 +313,17 @@ class SwarmOrchestrator:
                 "duration_ms": int,
             }
         """
+        # PIVOT CUT: auto-posting on the user's behalf is disabled. Posting is
+        # user-initiated only (export + native upload). This guard guarantees the
+        # behavior regardless of any stale per-user config. See PIVOT_SPEC.md §1.
+        return {
+            "error": (
+                "Auto-posting is disabled. MVC generates variants; you choose and "
+                "upload them natively. See PIVOT_SPEC.md."
+            ),
+            "job_id": None,
+        }
+
         config = await self.config_service.get_config(user_id)
         # Use custom allocation or explicit override
         allocated = config.get_pool_agents("post")
@@ -1027,6 +1059,7 @@ class SwarmOrchestrator:
                     status=result.status,
                     result_data=result.data,
                     cost_cents=result.cost_cents,
+                    cost_usd=getattr(result, "cost_usd", 0.0),
                     duration_ms=result.duration_ms,
                     error_message=result.error,
                 ))
@@ -1202,6 +1235,7 @@ class SwarmOrchestrator:
             "status": result.status,
             "data": result.data,
             "cost_cents": result.cost_cents,
+            "cost_usd": round(getattr(result, "cost_usd", 0.0), 6),
             "duration_ms": result.duration_ms,
             "error": result.error,
         }

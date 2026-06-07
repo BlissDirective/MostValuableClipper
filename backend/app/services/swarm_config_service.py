@@ -110,8 +110,9 @@ class SwarmConfigService:
             tier=tier,
             total_max_agents=total_agents,
             auto_balance=True,
+            # PIVOT: "post" (auto-posting) removed — posting is user-initiated only.
             enabled_pools=[
-                "hook", "remix", "post", "ab_test", "music_match",
+                "hook", "remix", "ab_test", "music_match",
                 "thumbnail", "safety", "hooks_analysis", "segment_analyze", "edit"
             ],
             daily_budget_cents=0,
@@ -325,6 +326,80 @@ class SwarmConfigService:
                 )
         except Exception as exc:
             logger.debug("[SwarmConfig] Post-execution budget audit failed: %s", exc)
+
+    # ─────────────────────────────────────────────────────────────
+    # PIVOT Fix 3 — per-user variant performance loop (the moat)
+    # ─────────────────────────────────────────────────────────────
+
+    # Require at least this many observations before trusting history over the
+    # model's self-estimate, so a single fluke clip doesn't bias ranking.
+    _MIN_OUTCOMES_FOR_TRUST = 3
+
+    @staticmethod
+    async def record_variant_outcome(
+        user_id: str,
+        pool_type: str,
+        persona: str,
+        platform: str,
+        retention: float,
+        variant_id: Optional[str] = None,
+        clip_id: Optional[str] = None,
+    ) -> None:
+        """Record the *real* observed performance of a shipped variant.
+
+        Called when a user reports/links the clip they actually posted and its
+        metrics flow back via MetricsSyncService. This is what turns best-pick
+        from a guess into a learned, per-user signal.
+        """
+        try:
+            supabase.table("variant_outcomes").insert({
+                "user_id": user_id,
+                "pool_type": pool_type,
+                "persona": persona,
+                "platform": platform,
+                "variant_id": variant_id,
+                "clip_id": clip_id,
+                "retention": float(retention),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+        except Exception as exc:
+            logger.warning("[SwarmConfig] Failed to record variant outcome: %s", exc)
+
+    @staticmethod
+    async def get_persona_performance(
+        user_id: str, pool_type: str, platform: Optional[str] = None
+    ) -> Dict[str, float]:
+        """Return {persona: avg_retention} for this user, pool, and platform.
+
+        Personas with fewer than _MIN_OUTCOMES_FOR_TRUST observations are omitted
+        so callers fall back to the model estimate until real signal accumulates.
+        """
+        try:
+            q = (
+                supabase.table("variant_outcomes")
+                .select("persona, retention")
+                .eq("user_id", user_id)
+                .eq("pool_type", pool_type)
+            )
+            if platform:
+                q = q.eq("platform", platform)
+            result = q.execute()
+        except Exception as exc:
+            logger.warning("[SwarmConfig] Failed to load persona performance: %s", exc)
+            return {}
+
+        buckets: Dict[str, List[float]] = {}
+        for row in (result.data or []):
+            persona = row.get("persona")
+            if not persona:
+                continue
+            buckets.setdefault(persona, []).append(float(row.get("retention", 0) or 0))
+
+        return {
+            persona: sum(vals) / len(vals)
+            for persona, vals in buckets.items()
+            if len(vals) >= SwarmConfigService._MIN_OUTCOMES_FOR_TRUST
+        }
 
 
 class SwarmJobService:

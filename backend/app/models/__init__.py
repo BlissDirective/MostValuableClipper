@@ -141,10 +141,10 @@ class SwarmConfig(BaseModel):
     tier: SwarmTier = SwarmTier.free
     
     # Custom agent allocation across swarm types
-    # Keys: "hook", "remix", "post"
+    # Keys: "hook", "remix", "edit", ... (PIVOT: "post" removed — no auto-posting)
     # Values: number of agents allocated to each type
     agent_allocation: Dict[str, int] = Field(
-        default_factory=lambda: {"hook": 1, "remix": 1, "post": 1},
+        default_factory=lambda: {"hook": 1, "remix": 1},
         description="Custom agent allocation per swarm type"
     )
     
@@ -156,7 +156,7 @@ class SwarmConfig(BaseModel):
     total_max_agents: int = Field(1, ge=1, le=50, description="Total agent limit")
     
     # Which swarm pools are enabled for this user
-    enabled_pools: List[str] = Field(default_factory=lambda: ["hook", "remix", "post"])
+    enabled_pools: List[str] = Field(default_factory=lambda: ["hook", "remix", "edit"])
     
     # Daily budget for swarm operations (cents)
     daily_budget_cents: int = Field(0, ge=0, description="Daily budget in cents. 0 = unlimited")
@@ -166,7 +166,7 @@ class SwarmConfig(BaseModel):
         default_factory=lambda: {
             "hook": {"personas": ["punchy", "aspirational", "controversial"]},
             "remix": {"strategies": ["energy_max", "face_presence", "hook_quality"]},
-            "post": {"parallel_accounts": True, "stagger_posts": False}
+            "edit": {"recipes": ["punchy_cuts", "captions_bold", "slow_zoom"]}
         },
         description="Agent behavior configuration per pool type"
     )
@@ -275,6 +275,7 @@ class SwarmAgentResult(BaseModel):
     status: str = "pending"  # pending, completed, failed
     result_data: Optional[Dict[str, Any]] = None
     cost_cents: int = 0
+    cost_usd: float = 0.0  # PIVOT Fix 2: real measured spend, finer than cents
     duration_ms: int = 0
     error_message: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

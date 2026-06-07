@@ -28,6 +28,18 @@ class AgentResult:
     cost_cents: int
     duration_ms: int
     error: Optional[str] = None
+    # PIVOT Fix 2: real measured spend (USD) from the LLM call. cost_cents is
+    # derived from this (round up to >=1 cent when any spend occurred) so budget
+    # enforcement runs on actual cost, not the old hardcoded constants.
+    cost_usd: float = 0.0
+
+
+def usd_to_cents(cost_usd: float) -> int:
+    """Convert measured USD spend to billable cents (ceil, min 1 if any spend)."""
+    import math
+    if cost_usd <= 0:
+        return 0
+    return max(1, math.ceil(cost_usd * 100))
 
 
 class HookSwarmAgent:
@@ -81,7 +93,8 @@ class HookSwarmAgent:
             if not transcript:
                 transcript = clip.get("caption", "") or ""
 
-            # Adjust prompt based on persona
+            # PIVOT Fix 1: the persona directive is now actually passed to the
+            # generator so each agent produces a genuinely distinct hook.
             system_override = self._persona_system_prompt(self.persona, platform)
 
             # Generate hooks via Claude (1 hook per agent for variety)
@@ -89,8 +102,11 @@ class HookSwarmAgent:
                 transcript_text=transcript,
                 user_top_archetypes=[],
                 num_variants=1,
-                platform=platform
+                platform=platform,
+                system_override=system_override,
             )
+            # PIVOT Fix 2: accumulate the real measured spend from each LLM call.
+            spend_usd = float(getattr(self.hook_service, "last_cost_usd", 0.0) or 0.0)
 
             duration_ms = int((time.time() - start) * 1000)
 
@@ -100,7 +116,8 @@ class HookSwarmAgent:
                     persona=self.persona,
                     status="failed",
                     data={},
-                    cost_cents=5,
+                    cost_cents=usd_to_cents(spend_usd),
+                    cost_usd=spend_usd,
                     duration_ms=duration_ms,
                     error="No hooks generated"
                 )
@@ -114,6 +131,7 @@ class HookSwarmAgent:
                 platform=platform,
                 max_length=150
             )
+            spend_usd += float(getattr(self.hook_service, "last_cost_usd", 0.0) or 0.0)
 
             return AgentResult(
                 agent_index=self.agent_index,
@@ -129,8 +147,10 @@ class HookSwarmAgent:
                     "hashtags": hashtags,
                     "clip_id": clip_id,
                     "platform": platform,
+                    "persona": self.persona,
                 },
-                cost_cents=10,  # ~$0.10 for hook + caption generation
+                cost_cents=usd_to_cents(spend_usd),
+                cost_usd=spend_usd,
                 duration_ms=duration_ms
             )
 
@@ -141,7 +161,7 @@ class HookSwarmAgent:
                 persona=self.persona,
                 status="failed",
                 data={},
-                cost_cents=5,
+                cost_cents=0,
                 duration_ms=int((time.time() - start) * 1000),
                 error=str(e)
             )
