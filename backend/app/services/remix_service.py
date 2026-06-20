@@ -267,26 +267,58 @@ class RemixService:
         
         return min(confidence, 1.0)
 
+    # PIVOT Fix 1: per-strategy scoring weights + hook directives so each remix
+    # swarm agent actually selects a *different* segment and writes hooks in a
+    # different voice, instead of every agent producing the identical remix.
+    # Keys are (hook, salience, energy, face).
+    _STRATEGY_WEIGHTS = {
+        "peak_energy":     (0.20, 0.20, 0.45, 0.15),
+        "hook_first":      (0.50, 0.25, 0.15, 0.10),
+        "emotional_arc":   (0.25, 0.45, 0.20, 0.10),
+        "face_focus":      (0.20, 0.20, 0.15, 0.45),
+        "question_moment": (0.40, 0.35, 0.15, 0.10),
+        "surprise_drop":   (0.25, 0.35, 0.35, 0.05),
+    }
+    _DEFAULT_WEIGHTS = (0.30, 0.25, 0.25, 0.20)
+
+    _STRATEGY_DIRECTIVES = {
+        "peak_energy": "Lead with the highest-energy, most kinetic line. Maximum momentum.",
+        "hook_first": "Open on the single strongest standalone hook line in the segment.",
+        "emotional_arc": "Lead with the most emotionally charged moment; target a clear feeling.",
+        "face_focus": "Write for a talking-head close-up; make it feel personal and direct.",
+        "question_moment": "Open with a provocative question that forces the viewer to stay for the answer.",
+        "surprise_drop": "Open on the most unexpected, pattern-breaking statement in the segment.",
+    }
+
     def _find_optimal_segments(self, source: Dict[str, Any],
                                target_duration: Tuple[float, float] = (15, 30),
-                               num_variants: int = 3) -> List[SegmentScore]:
-        """Find the best N segments for remixing."""
+                               num_variants: int = 3,
+                               strategy: Optional[str] = None) -> List[SegmentScore]:
+        """Find the best N segments for remixing.
+
+        ``strategy`` (PIVOT Fix 1) re-weights the composite score so different
+        swarm agents pick genuinely different segments.
+        """
         duration = source["duration"]
         transcript_segments = source["segments"]
         energy_peaks = source["energy_peaks"]
         shots = source["shots"]
-        
+
+        w_hook, w_sal, w_energy, w_face = self._STRATEGY_WEIGHTS.get(
+            strategy, self._DEFAULT_WEIGHTS
+        )
+
         min_dur, max_dur = target_duration
-        
+
         # Generate candidate windows (sliding window approach)
         candidates = []
         step = 2.0  # 2-second step
-        
+
         for start in [i * step for i in range(int(duration / step))]:
             for end in [start + min_dur, start + (min_dur + max_dur) / 2, start + max_dur]:
                 if end > duration:
                     continue
-                
+
                 # Get text for this window
                 window_text = ""
                 for seg in transcript_segments:
@@ -294,26 +326,23 @@ class RemixService:
                     seg_end = seg.get("end", 0)
                     if seg_start >= start and seg_end <= end:
                         window_text += " " + seg.get("text", "")
-                
+
                 window_text = window_text.strip()
-                
+
                 # Score the segment
                 salience = self._score_salience(window_text)
                 energy = self._score_energy(start, end, energy_peaks)
                 face = self._score_face_presence(start, end, shots)
                 hook = self._score_hook_quality(window_text, "")
-                
-                # Composite score — weighted combination
-                # Hook quality matters most for openings
-                # Face presence matters for 9:16 reframe
-                # Energy matters for retention
+
+                # Composite score — strategy-weighted combination (PIVOT Fix 1)
                 composite = (
-                    hook * 0.30 +        # 30% — hook quality
-                    salience * 0.25 +    # 25% — text salience
-                    energy * 0.25 +      # 25% — energy
-                    face * 0.20          # 20% — face presence (for vertical crop)
+                    hook * w_hook +
+                    salience * w_sal +
+                    energy * w_energy +
+                    face * w_face
                 )
-                
+
                 candidates.append(SegmentScore(
                     start=start,
                     end=end,
@@ -359,7 +388,8 @@ class RemixService:
         segment: SegmentScore,
         user_id: str,
         top_archetype: Optional[str] = None,
-        num_variants: int = 3
+        num_variants: int = 3,
+        strategy: Optional[str] = None
     ) -> List[GeneratedHook]:
         """Generate hooks using Anthropic Claude LLM."""
         # Get user's top archetypes from analytics
@@ -370,15 +400,19 @@ class RemixService:
                 user_top_archetypes = hook_analysis["archetypes"]
         except Exception:
             pass
-        
+
+        # PIVOT Fix 1: steer hook voice by remix strategy.
+        system_override = self._STRATEGY_DIRECTIVES.get(strategy) if strategy else None
+
         # Generate hooks via Claude
         hooks = await claude_hook_service.generate_hooks(
             transcript_text=segment.text,
             user_top_archetypes=user_top_archetypes,
             num_variants=num_variants,
-            platform="tiktok"
+            platform="tiktok",
+            system_override=system_override,
         )
-        
+
         return hooks
 
     async def _generate_caption_llm(
@@ -649,7 +683,8 @@ class RemixService:
                            clip_id: str,
                            user_id: str,
                            num_variants: int = 3,
-                           target_duration: Tuple[float, float] = (15, 30)) -> Dict[str, Any]:
+                           target_duration: Tuple[float, float] = (15, 30),
+                           strategy: Optional[str] = None) -> Dict[str, Any]:
         """
         Create AI-powered remix variants of an existing clip.
         
@@ -675,7 +710,8 @@ class RemixService:
             }
         """
         temp_dir = tempfile.mkdtemp(prefix=f"remix_{clip_id}_")
-        
+        cost_usd_total = 0.0  # PIVOT Fix 2: accumulate real LLM spend
+
         try:
             # 1. Fetch original clip
             clip = await self.db.get_clip(clip_id)
@@ -715,11 +751,12 @@ class RemixService:
                     "text": clip.get("caption", "")
                 }]
             
-            # 4. Find optimal segments
+            # 4. Find optimal segments (strategy-weighted — PIVOT Fix 1)
             segments = self._find_optimal_segments(
                 source_analysis,
                 target_duration=target_duration,
-                num_variants=num_variants
+                num_variants=num_variants,
+                strategy=strategy,
             )
             
             if not segments:
@@ -737,21 +774,26 @@ class RemixService:
             # 6. Generate variants
             variants = []
             for i, segment in enumerate(segments):
-                # Generate hooks via Claude LLM
+                # Generate hooks via Claude LLM (strategy-steered — PIVOT Fix 1)
                 generated_hooks = await self._generate_hook_variants_llm(
-                    segment, user_id, user_top_archetype, num_variants=1
+                    segment, user_id, user_top_archetype, num_variants=1,
+                    strategy=strategy,
                 )
-                
+                # PIVOT Fix 2: capture real spend immediately (no await between
+                # the call returning and this read, so the singleton value is ours).
+                cost_usd_total += float(getattr(claude_hook_service, "last_cost_usd", 0.0) or 0.0)
+
                 if not generated_hooks:
                     logger.warning(f"[Remix] No hooks generated for variant {i+1}")
                     continue
-                
+
                 hook = generated_hooks[0]
-                
+
                 # Generate caption via Claude LLM
                 caption, hashtags = await self._generate_caption_llm(
                     hook, segment.text
                 )
+                cost_usd_total += float(getattr(claude_hook_service, "last_cost_usd", 0.0) or 0.0)
                 
                 # Select music mood
                 music_mood = self._select_music_mood(segment)
@@ -869,7 +911,9 @@ class RemixService:
                 "success": True,
                 "original_clip_id": clip_id,
                 "variants": variants,
-                "total_variants": len(variants)
+                "total_variants": len(variants),
+                "cost_usd": round(cost_usd_total, 6),  # PIVOT Fix 2
+                "strategy": strategy,
             }
         
         except Exception as e:

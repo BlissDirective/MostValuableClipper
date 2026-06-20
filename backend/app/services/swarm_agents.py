@@ -234,13 +234,17 @@ class RemixSwarmAgent:
                     error="Not authorized"
                 )
 
-            # Create remix via RemixService (generates 1 variant per call when swarm mode)
+            # Create remix via RemixService. PIVOT Fix 1: pass this agent's
+            # strategy so it selects a distinct segment and hook voice.
             result = await self.remix_service.create_remix(
                 clip_id=clip_id,
                 user_id=user_id,
                 num_variants=1,
-                target_duration=target_duration
+                target_duration=target_duration,
+                strategy=self.strategy,
             )
+            # PIVOT Fix 2: real measured LLM spend from the remix.
+            spend_usd = float(result.get("cost_usd", 0.0) or 0.0)
 
             duration_ms = int((time.time() - start) * 1000)
 
@@ -250,7 +254,8 @@ class RemixSwarmAgent:
                     persona=self.strategy,
                     status="failed",
                     data={},
-                    cost_cents=10,
+                    cost_cents=usd_to_cents(spend_usd),
+                    cost_usd=spend_usd,
                     duration_ms=duration_ms,
                     error=result.get("error", "Remix failed")
                 )
@@ -262,7 +267,8 @@ class RemixSwarmAgent:
                     persona=self.strategy,
                     status="failed",
                     data={},
-                    cost_cents=10,
+                    cost_cents=usd_to_cents(spend_usd),
+                    cost_usd=spend_usd,
                     duration_ms=duration_ms,
                     error="No variants generated"
                 )
@@ -287,8 +293,10 @@ class RemixSwarmAgent:
                     "music_mood": variant.get("music_mood"),
                     "estimated_retention": variant.get("estimated_retention"),
                     "original_clip_id": clip_id,
+                    "strategy": self.strategy,
                 },
-                cost_cents=20,  # ~$0.20 for video processing
+                cost_cents=usd_to_cents(spend_usd),
+                cost_usd=spend_usd,
                 duration_ms=duration_ms
             )
 
@@ -1208,11 +1216,12 @@ class EditSwarmAgent:
                     error="No video URL"
                 )
 
-            # Build recipe-specific edit config
+            # Build recipe-specific edit config (PIVOT Fix 1: each recipe yields a
+            # genuinely different edit config — see _build_recipe_config).
             edit_config = self._build_recipe_config(duration)
 
-            # For MVP: return the recipe config (actual FFmpeg processing would run here)
-            # Full implementation would call ffmpeg.build_edit_command and execute
+            # PIVOT Fix 2: edits are local FFmpeg — no LLM/API spend, so cost_usd=0.
+            # (Compute-seconds metering is a separate workstream; not a magic literal.)
             return AgentResult(
                 agent_index=self.agent_index,
                 persona=self.recipe,
@@ -1226,7 +1235,8 @@ class EditSwarmAgent:
                     "requires_ffmpeg": True,
                     "preview_available": True
                 },
-                cost_cents=15,
+                cost_cents=0,
+                cost_usd=0.0,
                 duration_ms=int((time.time() - start) * 1000)
             )
 
@@ -1237,7 +1247,8 @@ class EditSwarmAgent:
                 persona=self.recipe,
                 status="failed",
                 data={},
-                cost_cents=5,
+                cost_cents=0,
+                cost_usd=0.0,
                 duration_ms=int((time.time() - start) * 1000),
                 error=str(e)
             )

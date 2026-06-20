@@ -247,16 +247,30 @@ class SwarmOrchestrator:
         results = await self._run_agents(agents, job_id, clip_id, "", user_id)
         duration_ms = int((time.time() - start_time) * 1000)
 
+        # PIVOT Fix 3: rank remix variants by real per-user strategy performance
+        # when available, else the model estimate.
         completed = [r for r in results if r.status == "completed" and r.data]
         best_variant = None
         best_strategy = None
         best = None
+        ranked_by = "estimate"
         if completed:
-            best = max(completed, key=lambda r: r.data.get("estimated_retention", 0))
+            persona_scores = await self.config_service.get_persona_performance(
+                user_id, "remix"
+            )
+
+            def _rank(r):
+                hist = persona_scores.get(r.persona)
+                return hist if hist is not None else (r.data.get("estimated_retention", 0) or 0)
+
+            best = max(completed, key=_rank)
             best_variant = best.data
             best_strategy = best.persona
+            if persona_scores.get(best.persona) is not None:
+                ranked_by = "history"
 
         total_cost = sum(r.cost_cents for r in results)
+        total_cost_usd = round(sum(getattr(r, "cost_usd", 0.0) for r in results), 6)
 
         job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
         job.completed_agents = len(completed)
@@ -280,6 +294,8 @@ class SwarmOrchestrator:
             "variants": [self._serialize_result(r) for r in results],
             "best_variant": best_variant,
             "total_cost_cents": total_cost,
+            "total_cost_usd": total_cost_usd,
+            "ranked_by": ranked_by,
             "duration_ms": duration_ms,
         }
 
@@ -984,6 +1000,7 @@ class SwarmOrchestrator:
         completed = [r for r in results if r.status == "completed"]
 
         total_cost = sum(r.cost_cents for r in results)
+        total_cost_usd = round(sum(getattr(r, "cost_usd", 0.0) for r in results), 6)
 
         job.status = SwarmJobStatus.completed if completed else SwarmJobStatus.failed
         job.completed_agents = len(completed)
@@ -1005,6 +1022,7 @@ class SwarmOrchestrator:
             "agents": len(agents),
             "results": [self._serialize_result(r) for r in results],
             "total_cost_cents": total_cost,
+            "total_cost_usd": total_cost_usd,
             "duration_ms": duration_ms,
         }
 
