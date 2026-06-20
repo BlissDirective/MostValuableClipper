@@ -72,9 +72,17 @@ class ClaudeHookService:
         user_top_archetypes: List[Dict[str, Any]],
         num_variants: int = 3,
         platform: str = "tiktok",
-        niche: Optional[str] = None
+        niche: Optional[str] = None,
+        system_override: Optional[str] = None,
     ) -> List[GeneratedHook]:
         """Generate viral hook variants via LLMRouter (PREMIUM tier).
+
+        Args:
+            system_override: PIVOT Fix 1 — a persona/strategy directive appended to
+                the base system prompt so swarm agents actually produce *distinct*
+                hooks instead of N identical calls. The base prompt (platform rules +
+                strict JSON contract) is always preserved; the override only steers
+                style/angle.
 
         Returns:
             List of GeneratedHook objects with metadata.
@@ -85,6 +93,11 @@ class ClaudeHookService:
 
         router = _get_router()
         system_prompt = self._build_system_prompt(platform, niche)
+        if system_override:
+            system_prompt = (
+                f"{system_prompt}\n\n"
+                f"PERSONA DIRECTIVE (apply this voice/angle to every hook):\n{system_override}"
+            )
         user_prompt = self._build_user_prompt(transcript_text, user_top_archetypes, num_variants)
 
         try:

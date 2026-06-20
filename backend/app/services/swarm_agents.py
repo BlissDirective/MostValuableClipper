@@ -28,6 +28,18 @@ class AgentResult:
     cost_cents: int
     duration_ms: int
     error: Optional[str] = None
+    # PIVOT Fix 2: real measured spend (USD) from the LLM call. cost_cents is
+    # derived from this (round up to >=1 cent when any spend occurred) so budget
+    # enforcement runs on actual cost, not the old hardcoded constants.
+    cost_usd: float = 0.0
+
+
+def usd_to_cents(cost_usd: float) -> int:
+    """Convert measured USD spend to billable cents (ceil, min 1 if any spend)."""
+    import math
+    if cost_usd <= 0:
+        return 0
+    return max(1, math.ceil(cost_usd * 100))
 
 
 class HookSwarmAgent:
@@ -81,7 +93,8 @@ class HookSwarmAgent:
             if not transcript:
                 transcript = clip.get("caption", "") or ""
 
-            # Adjust prompt based on persona
+            # PIVOT Fix 1: the persona directive is now actually passed to the
+            # generator so each agent produces a genuinely distinct hook.
             system_override = self._persona_system_prompt(self.persona, platform)
 
             # Generate hooks via Claude (1 hook per agent for variety)
@@ -89,8 +102,11 @@ class HookSwarmAgent:
                 transcript_text=transcript,
                 user_top_archetypes=[],
                 num_variants=1,
-                platform=platform
+                platform=platform,
+                system_override=system_override,
             )
+            # PIVOT Fix 2: accumulate the real measured spend from each LLM call.
+            spend_usd = float(getattr(self.hook_service, "last_cost_usd", 0.0) or 0.0)
 
             duration_ms = int((time.time() - start) * 1000)
 
@@ -100,7 +116,8 @@ class HookSwarmAgent:
                     persona=self.persona,
                     status="failed",
                     data={},
-                    cost_cents=5,
+                    cost_cents=usd_to_cents(spend_usd),
+                    cost_usd=spend_usd,
                     duration_ms=duration_ms,
                     error="No hooks generated"
                 )
@@ -114,6 +131,7 @@ class HookSwarmAgent:
                 platform=platform,
                 max_length=150
             )
+            spend_usd += float(getattr(self.hook_service, "last_cost_usd", 0.0) or 0.0)
 
             return AgentResult(
                 agent_index=self.agent_index,
@@ -129,8 +147,10 @@ class HookSwarmAgent:
                     "hashtags": hashtags,
                     "clip_id": clip_id,
                     "platform": platform,
+                    "persona": self.persona,
                 },
-                cost_cents=10,  # ~$0.10 for hook + caption generation
+                cost_cents=usd_to_cents(spend_usd),
+                cost_usd=spend_usd,
                 duration_ms=duration_ms
             )
 
@@ -141,7 +161,7 @@ class HookSwarmAgent:
                 persona=self.persona,
                 status="failed",
                 data={},
-                cost_cents=5,
+                cost_cents=0,
                 duration_ms=int((time.time() - start) * 1000),
                 error=str(e)
             )
@@ -214,13 +234,17 @@ class RemixSwarmAgent:
                     error="Not authorized"
                 )
 
-            # Create remix via RemixService (generates 1 variant per call when swarm mode)
+            # Create remix via RemixService. PIVOT Fix 1: pass this agent's
+            # strategy so it selects a distinct segment and hook voice.
             result = await self.remix_service.create_remix(
                 clip_id=clip_id,
                 user_id=user_id,
                 num_variants=1,
-                target_duration=target_duration
+                target_duration=target_duration,
+                strategy=self.strategy,
             )
+            # PIVOT Fix 2: real measured LLM spend from the remix.
+            spend_usd = float(result.get("cost_usd", 0.0) or 0.0)
 
             duration_ms = int((time.time() - start) * 1000)
 
@@ -230,7 +254,8 @@ class RemixSwarmAgent:
                     persona=self.strategy,
                     status="failed",
                     data={},
-                    cost_cents=10,
+                    cost_cents=usd_to_cents(spend_usd),
+                    cost_usd=spend_usd,
                     duration_ms=duration_ms,
                     error=result.get("error", "Remix failed")
                 )
@@ -242,7 +267,8 @@ class RemixSwarmAgent:
                     persona=self.strategy,
                     status="failed",
                     data={},
-                    cost_cents=10,
+                    cost_cents=usd_to_cents(spend_usd),
+                    cost_usd=spend_usd,
                     duration_ms=duration_ms,
                     error="No variants generated"
                 )
@@ -267,8 +293,10 @@ class RemixSwarmAgent:
                     "music_mood": variant.get("music_mood"),
                     "estimated_retention": variant.get("estimated_retention"),
                     "original_clip_id": clip_id,
+                    "strategy": self.strategy,
                 },
-                cost_cents=20,  # ~$0.20 for video processing
+                cost_cents=usd_to_cents(spend_usd),
+                cost_usd=spend_usd,
                 duration_ms=duration_ms
             )
 
@@ -1188,11 +1216,12 @@ class EditSwarmAgent:
                     error="No video URL"
                 )
 
-            # Build recipe-specific edit config
+            # Build recipe-specific edit config (PIVOT Fix 1: each recipe yields a
+            # genuinely different edit config — see _build_recipe_config).
             edit_config = self._build_recipe_config(duration)
 
-            # For MVP: return the recipe config (actual FFmpeg processing would run here)
-            # Full implementation would call ffmpeg.build_edit_command and execute
+            # PIVOT Fix 2: edits are local FFmpeg — no LLM/API spend, so cost_usd=0.
+            # (Compute-seconds metering is a separate workstream; not a magic literal.)
             return AgentResult(
                 agent_index=self.agent_index,
                 persona=self.recipe,
@@ -1206,7 +1235,8 @@ class EditSwarmAgent:
                     "requires_ffmpeg": True,
                     "preview_available": True
                 },
-                cost_cents=15,
+                cost_cents=0,
+                cost_usd=0.0,
                 duration_ms=int((time.time() - start) * 1000)
             )
 
@@ -1217,7 +1247,8 @@ class EditSwarmAgent:
                 persona=self.recipe,
                 status="failed",
                 data={},
-                cost_cents=5,
+                cost_cents=0,
+                cost_usd=0.0,
                 duration_ms=int((time.time() - start) * 1000),
                 error=str(e)
             )

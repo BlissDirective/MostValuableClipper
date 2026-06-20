@@ -26,3 +26,6 @@ langgraph>=0.2.0
 # Dev / test
 pytest>=8.0.0
 pytest-asyncio>=0.23.5
+
+# Phase 2: optional URL ingest path
+yt-dlp>=2024.1.0
