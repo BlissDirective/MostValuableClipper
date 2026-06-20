@@ -42,12 +42,13 @@
 **Goal:** one workflow that actually runs for a user's *own* uploaded video, with a watchable result. Today: no active video worker, no in-app player, and `yt-dlp`/transcription libs are missing from `requirements.txt`.
 
 **Workstream checklist**
-- ⬜ **Deps:** add `yt-dlp` (or direct-upload path that skips it) + a transcription lib (`faster-whisper` / `openai` transcribe) to `requirements.in`/`requirements.txt`; ensure `ffmpeg` present in the Docker image.
-- ⬜ **Ingest:** user uploads their own long-form file (R2 presigned PUT) — no third-party URL sourcing in the default path.
-- ⬜ **Worker:** a running consumer that processes a queued job: download/locate source → transcribe → `segment_analyze` → generate hook/remix variants → render → store. (Wire the existing Celery worker; today queued clips never process.)
-- ⬜ **Player:** in-app video player on the clip/variant detail screen (replaces the static `Film` icon) so users can preview variants.
-- ⬜ **Export / native share:** download + OS share sheet; **no auto-post**.
-- ⬜ **Pipeline status:** surface job state (queued/processing/done/failed) end-to-end.
+- ✅ **Deps:** `yt-dlp` added to `requirements.in`/`requirements.txt`; `ffmpeg` already in `Dockerfile` + `Dockerfile.worker`; transcription uses the OpenAI Whisper API (no local model needed).
+- ✅ **Worker consumer wired:** fixed the queue mismatch — the worker now listens on `clip_generation` (the queue the clips API writes to; previously unlistened, so queued clips never processed). New `_process_ingest` runs the full pipeline; broken `_process_transcribe` fixed (now extracts audio before transcribing).
+- ✅ **Ingest pipeline (backend):** download source → `extract_audio` → Whisper transcribe → `find_interesting_segments` → `render_segment` per pick → upload → create child clip records (`ready_for_review`); parent status flows `processing → processed`; transcription cost estimated. Orchestration unit-tested with fakes.
+- ⬜ **Upload path:** R2 presigned PUT endpoint so users upload their **own** long-form file (no third-party URL sourcing in the default path).
+- ⬜ **Player:** in-app video player on the clip/variant detail screen (replaces the static `Film` icon) so users can preview variants. *(frontend)*
+- ⬜ **Export / native share:** download + OS share sheet; **no auto-post**. *(frontend)*
+- ⬜ **Pipeline status (UI):** worker now sets `queued/processing/processed/failed`; surface it in the app. *(frontend)*
 
 **Definition of done (Phase 2):** upload own long-form → transcribe → segment → **8 distinct hook+caption variants** → preview in an **actual video player** → export / native share, with measured `cost_usd` shown.
 

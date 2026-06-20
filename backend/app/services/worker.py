@@ -26,7 +26,9 @@ class VideoProcessingWorker:
     and flooding logs.
     """
 
-    QUEUES = ["video_processing", "swarm_batch"]
+    # Phase 2: "clip_generation" is the queue the API writes to on clip create —
+    # previously unlistened, so queued clips never processed. Now consumed here.
+    QUEUES = ["clip_generation", "video_processing", "swarm_batch"]
 
     # Circuit-breaker thresholds
     CIRCUIT_OPEN_THRESHOLD = 5   # consecutive failures before opening
@@ -55,7 +57,11 @@ class VideoProcessingWorker:
         print(f"[{datetime.now().isoformat()}] Processing job {job_id} ({job_type})")
         
         try:
-            if job_type == "edit_clip":
+            # Phase 2: clip_generation jobs (from the clips API) carry no job_type;
+            # route them through the full ingest pipeline.
+            if job_type in ("ingest_source", "ingest") or (job_type is None and job.get("clip_id")):
+                return await self._process_ingest(job)
+            elif job_type == "edit_clip":
                 return await self._process_edit(job)
             elif job_type == "remix_clip":
                 return await self._process_remix(job)
@@ -78,6 +84,114 @@ class VideoProcessingWorker:
             print(f"[{datetime.now().isoformat()}] Job {job_id} failed: {str(e)}")
             return {"success": False, "error": str(e)}
     
+    async def _process_ingest(self, job: Dict[str, Any]) -> Dict[str, Any]:
+        """Phase 2 end-to-end ingest for a user's OWN uploaded source video.
+
+        upload → download → extract audio → transcribe → pick interesting
+        segments → render each as a standalone clip → upload → create clip
+        records (status ready_for_review). No auto-posting; user reviews/exports.
+        """
+        import tempfile, shutil, os
+        clip_id = job.get("clip_id")
+        user_id = job.get("user_id")
+        if not clip_id:
+            return {"success": False, "error": "ingest job missing clip_id"}
+
+        parent = await self.db.get_clip(clip_id)
+        if not parent:
+            return {"success": False, "error": "source clip not found"}
+
+        # Resolve the uploaded source URL (clip record, else its source row).
+        source_url = parent.get("video_url") or parent.get("source_url")
+        if not source_url and job.get("source_id"):
+            try:
+                src = await self.db.get_source(job["source_id"])
+                source_url = (src or {}).get("url") or (src or {}).get("video_url")
+            except Exception:
+                source_url = None
+        if not source_url:
+            await self.db.update_clip(clip_id, {"status": "failed", "updated_at": "now()"})
+            return {"success": False, "error": "no source video to ingest"}
+
+        await self.db.update_clip(clip_id, {"status": "processing", "updated_at": "now()"})
+
+        temp_dir = tempfile.mkdtemp(prefix=f"ingest_{clip_id}_")
+        try:
+            # 1. Download source once.
+            source_path = await self.ffmpeg.download_source(source_url, temp_dir)
+
+            # 2. Extract audio + 3. transcribe.
+            audio_path = os.path.join(temp_dir, "audio.wav")
+            ok, info = self.ffmpeg.extract_audio(source_path, audio_path)
+            from app.services.transcription import TranscriptionService
+            transcriber = TranscriptionService()
+            transcription = await transcriber.transcribe(audio_path) if ok else {"segments": [], "duration": 0}
+
+            # 4. Pick interesting segments (falls back to whole-video if none).
+            video_info = self.ffmpeg._get_video_info(source_path)
+            total_duration = transcription.get("duration") or video_info.get("duration") or 0
+            segments = transcriber.find_interesting_segments(
+                transcription, min_duration=15, max_duration=90, num_clips=8
+            )
+            if not segments and total_duration:
+                segments = [{"start": 0, "end": min(total_duration, 60), "text": transcription.get("text", "")}]
+
+            # 5-6. Render + upload + create a clip record per segment.
+            created = []
+            for i, seg in enumerate(segments):
+                start, end = float(seg.get("start", 0)), float(seg.get("end", 0))
+                if end <= start:
+                    continue
+                out_path = os.path.join(temp_dir, f"clip_{i}.mp4")
+                ok, rendered = self.ffmpeg.render_segment(source_path, start, end, out_path)
+                if not ok:
+                    continue
+                variant_id = f"{clip_id}_seg{i}"
+                video_url = await self.ffmpeg.upload_result(rendered, variant_id)
+                rec = await self.db.create_clip({
+                    "user_id": user_id,
+                    "parent_clip_id": clip_id,
+                    "pipeline_id": parent.get("pipeline_id"),
+                    "source_id": parent.get("source_id"),
+                    "title": f"Clip {i+1}: {parent.get('title', 'Untitled')}",
+                    "caption": (seg.get("text") or "").strip()[:300],
+                    "status": "ready_for_review",
+                    "video_url": video_url,
+                    "duration_seconds": round(end - start, 2),
+                    "metadata": {
+                        "segment": {"start": start, "end": end},
+                        "transcript_text": (seg.get("text") or "").strip(),
+                        "ingest_score": seg.get("score"),
+                    },
+                    "created_at": "now()",
+                    "updated_at": "now()",
+                })
+                created.append(rec.get("id") if isinstance(rec, dict) else None)
+
+            # 7. Mark the source done. Transcription cost ≈ $0.006/min (Whisper).
+            cost_usd = round((total_duration / 60.0) * 0.006, 6) if total_duration else 0.0
+            await self.db.update_clip(clip_id, {
+                "status": "processed" if created else "failed",
+                "metadata": {
+                    "transcript_text": transcription.get("text", ""),
+                    "child_clip_ids": created,
+                    "ingest_cost_usd": cost_usd,
+                },
+                "updated_at": "now()",
+            })
+            return {
+                "success": bool(created),
+                "clip_id": clip_id,
+                "clips_created": len(created),
+                "child_clip_ids": created,
+                "cost_usd": cost_usd,
+            }
+        except Exception as e:
+            await self.db.update_clip(clip_id, {"status": "failed", "updated_at": "now()"})
+            return {"success": False, "error": f"Ingest failed: {str(e)}"}
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     async def _process_edit(self, job: Dict[str, Any]) -> Dict[str, Any]:
         """Process an edit clip job."""
         clip_id = job["clip_id"]
@@ -230,25 +344,40 @@ class VideoProcessingWorker:
             shutil.rmtree(temp_dir, ignore_errors=True)
     
     async def _process_transcribe(self, job: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a transcription job."""
+        """Process a transcription job.
+
+        Fix (Phase 2): TranscriptionService.transcribe expects a local AUDIO file,
+        not a video URL. Download the source, extract audio, then transcribe. The
+        Whisper response has no "success" key, so derive it from the result.
+        """
+        import tempfile, shutil, os
         clip_id = job["clip_id"]
         source_url = job["source_url"]
-        
+
+        temp_dir = tempfile.mkdtemp(prefix=f"transcribe_{clip_id}_")
         try:
             from app.services.transcription import TranscriptionService
             transcriber = TranscriptionService()
-            result = await transcriber.transcribe(source_url)
-            
-            if result.get("success"):
-                await self.db.update_clip(clip_id, {
-                    "caption": result.get("text", ""),
-                    "transcript": result.get("segments", []),
-                    "updated_at": "now()"
-                })
-            
-            return result
+
+            source_path = await self.ffmpeg.download_source(source_url, temp_dir)
+            audio_path = os.path.join(temp_dir, "audio.wav")
+            ok, info = self.ffmpeg.extract_audio(source_path, audio_path)
+            if not ok:
+                return {"success": False, "error": f"Audio extraction failed: {info}"}
+
+            result = await transcriber.transcribe(audio_path)
+            text = result.get("text", "")
+
+            await self.db.update_clip(clip_id, {
+                "caption": text,
+                "transcript": result.get("segments", []),
+                "updated_at": "now()",
+            })
+            return {"success": bool(text or result.get("segments")), **result}
         except Exception as e:
             return {"success": False, "error": f"Transcription failed: {str(e)}"}
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
     
     async def _process_batch_swarm(self, job: Dict[str, Any]) -> Dict[str, Any]:
         """Process a batch swarm job by delegating to the swarm batch service."""

@@ -88,7 +88,33 @@ class FFmpegEditService:
         key = f"clips/{clip_id}_edited.mp4"
         await self.r2.upload_file(local_path, key)
         return await self.r2.get_presigned_url(key, expires_in=604800)
-    
+
+    def extract_audio(self, source_path: str, out_path: str) -> Tuple[bool, str]:
+        """Extract a 16kHz mono WAV from a video for transcription (Phase 2 ingest)."""
+        cmd = [
+            "ffmpeg", "-y", "-i", source_path,
+            "-vn", "-ac", "1", "-ar", "16000", "-f", "wav",
+            out_path,
+        ]
+        ok, info = self._run_ffmpeg(cmd, timeout=600)
+        return ok, (out_path if ok else info)
+
+    def render_segment(self, source_path: str, start: float, end: float, out_path: str) -> Tuple[bool, str]:
+        """Trim [start, end] from a local source into a standalone clip (Phase 2 ingest).
+
+        Re-encodes (not stream-copy) so cut points are frame-accurate.
+        """
+        duration = max(0.1, float(end) - float(start))
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(float(start)), "-i", source_path,
+            "-t", str(duration),
+            "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac",
+            "-movflags", "+faststart",
+            out_path,
+        ]
+        ok, info = self._run_ffmpeg(cmd, timeout=600)
+        return ok, (out_path if ok else info)
+
     async def download_sticker(self, sticker_url: str, temp_dir: str) -> str:
         """Download sticker image to temp directory."""
         ext = sticker_url.split("?")[0].split(".")[-1] or "png"
