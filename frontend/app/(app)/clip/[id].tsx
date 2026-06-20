@@ -23,6 +23,9 @@ import {
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Video, ResizeMode } from "expo-av";
+import * as Sharing from "expo-sharing";
+// SDK 54: downloadAsync/cacheDirectory live in the legacy module.
+import * as FileSystem from "expo-file-system/legacy";
 
 import { tokens } from "@/constants/tokens";
 import { ActionButton } from "@/components/ActionButton";
@@ -44,6 +47,7 @@ interface DetailData {
   platforms: { platform: Platform; handle: string; views: string; watchTime: string; earnings: string }[];
   safety?: { variant: SafetyVariant; categories: string[]; reasoning: string; actionTaken: string; } | null;
   videoUrl?: string;
+  status?: string;
   hasMetrics?: boolean;
   views?: number;
   likes?: number;
@@ -53,6 +57,26 @@ interface DetailData {
   retentionPct?: number;
   earningsCents?: number;
   metricsSyncedAt?: string;
+}
+
+// Phase 2: map a clip's pipeline status to a label + color for the status pill.
+function statusMeta(status: string): { label: string; color: string } {
+  const s = (status || "").toLowerCase();
+  const success = tokens.color.semantic?.success ?? "#1FCB8C";
+  const warning = tokens.color.semantic?.warning ?? "#F0B438";
+  const danger = tokens.color.semantic?.danger ?? "#F25555";
+  const map: Record<string, { label: string; color: string }> = {
+    awaiting_upload: { label: "Awaiting upload", color: warning },
+    queued: { label: "Queued", color: warning },
+    processing: { label: "Processing…", color: warning },
+    processed: { label: "Processed", color: success },
+    ready_for_review: { label: "Ready for review", color: success },
+    rendered: { label: "Ready", color: success },
+    approved: { label: "Approved", color: success },
+    posted: { label: "Posted", color: success },
+    failed: { label: "Failed", color: danger },
+  };
+  return map[s] || { label: status, color: tokens.color.text.secondary };
 }
 
 export default function ClipDetailScreen() {
@@ -213,6 +237,7 @@ export default function ClipDetailScreen() {
         platforms,
         safety,
         videoUrl: clipData.video_url,
+        status: clipData.status,
         hasMetrics,
         views: clipData.views,
         likes: clipData.likes,
@@ -275,6 +300,30 @@ export default function ClipDetailScreen() {
         } catch (err: any) {
           console.warn("[clip-detail] download failed:", err.message);
           Alert.alert("Download Failed", err?.detail || "Could not generate download link.");
+        }
+      } else if (action === "share") {
+        // Phase 2: user-initiated native share/export (no auto-posting). Pull the
+        // clip to a local cache file, then open the OS share sheet so the user can
+        // post it themselves to TikTok/Reels/Shorts/etc.
+        try {
+          triggerHaptic("blockTriggered");
+          const canShare = await Sharing.isAvailableAsync();
+          const result = await clipsApi.downloadUrl(clip.id);
+          if (!result?.url) {
+            Alert.alert("Share Unavailable", "No file URL found for this clip.");
+            return;
+          }
+          if (!canShare) {
+            // Fallback: open the URL if the share sheet isn't available.
+            await Linking.openURL(result.url);
+            return;
+          }
+          const target = `${FileSystem.cacheDirectory}blissclip_${clip.id}.mp4`;
+          const dl = await FileSystem.downloadAsync(result.url, target);
+          await Sharing.shareAsync(dl.uri, { mimeType: "video/mp4", dialogTitle: "Share your clip" });
+        } catch (err: any) {
+          console.warn("[clip-detail] share failed:", err.message);
+          Alert.alert("Share Failed", err?.detail || "Could not prepare the clip for sharing.");
         }
       } else if (action === "edit") {
         // Navigate to edit screen
@@ -488,6 +537,14 @@ export default function ClipDetailScreen() {
                   strokeWidth={tokens.icon.stroke.default}
                 />
               </Pressable>
+              {!!clip.status && (
+                <View style={[styles.statusPill, { borderColor: statusMeta(clip.status).color }]}>
+                  <View style={[styles.statusDot, { backgroundColor: statusMeta(clip.status).color }]} />
+                  <Text style={[styles.statusPillText, { color: statusMeta(clip.status).color }]}>
+                    {statusMeta(clip.status).label}
+                  </Text>
+                </View>
+              )}
             </SafeAreaView>
           </View>
 
@@ -577,11 +634,11 @@ export default function ClipDetailScreen() {
         <SafeAreaView edges={["bottom"]} style={styles.footer}>
           <View style={styles.footerRow}>
             <ActionButton
-              label="Post"
+              label="Share"
               variant="primary"
               size="md"
-              iconLeft={Repeat}
-              onPress={() => handleAction("post")}
+              iconLeft={Share2}
+              onPress={() => handleAction("share")}
             />
             <ActionButton
               label="Swarm"
@@ -683,6 +740,26 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.spacing.xs,
+    margin: tokens.spacing.md,
+    paddingHorizontal: tokens.spacing.sm,
+    paddingVertical: 4,
+    borderRadius: tokens.radius.pill,
+    borderWidth: 1,
+    backgroundColor: tokens.color.bg.overlay,
+  },
+  statusDot: { width: 7, height: 7, borderRadius: tokens.radius.pill },
+  statusPillText: {
+    fontFamily: tokens.type.scale.caption.family,
+    fontSize: tokens.type.scale.caption.size,
+    letterSpacing: tokens.type.scale.caption.letterSpacing,
   },
   backBtn: {
     margin: tokens.spacing.md,

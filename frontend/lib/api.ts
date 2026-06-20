@@ -348,6 +348,13 @@ export const clipsApi = {
   getEditStatus: (id: string) => req('GET', `/clips/${id}/edit-status`),
   thumbnails: (id: string) => req<{ thumbnails: string[] }>('GET', `/clips/${id}/thumbnails`),
   runEditAgents: (id: string, opts?: Record<string, any>) => req('POST', `/swarm/edit`, { clip_id: id, ...opts }),
+  // Phase 2 ingest: mint a presigned PUT URL for the user's own source video.
+  uploadInit: (body: { filename: string; content_type?: string; pipeline_id?: string; title?: string }) =>
+    req<{ clip_id: string; upload_url: string; method: string; headers: Record<string, string>; video_url: string; expires_in: number }>(
+      'POST', '/clips/upload-init', body
+    ),
+  // Phase 2 ingest: after the PUT completes, queue transcription/segmentation.
+  startIngest: (id: string) => req<{ clip_id: string; status: string }>('POST', `/clips/${id}/ingest`),
 };
 
 export const pipelinesApi = {
