@@ -16,6 +16,7 @@ from app.services.r2_service import R2Service
 from app.services.zernio_service import ZernioService
 from app.services.ffmpeg_service import FFmpegEditService
 from app.services.music_library_service import music_library_service as music_library
+from app.core.config import settings
 from datetime import datetime, timedelta, timezone
 
 router = APIRouter(prefix="/clips", tags=["clips"])
@@ -327,6 +328,85 @@ async def post_clip(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Post failed: {str(e)}")
+
+class UploadInitRequest(BaseModel):
+    filename: str
+    content_type: str = "video/mp4"
+    pipeline_id: Optional[str] = None
+    title: Optional[str] = None
+
+
+@router.post("/upload-init")
+async def init_upload(
+    body: UploadInitRequest,
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
+):
+    """Phase 2 ingest step 1: mint a presigned PUT URL for the user's OWN source video.
+
+    The client uploads bytes directly to R2, then calls POST /clips/{id}/ingest to
+    kick off transcription → segmentation → clip rendering. Bytes never pass through
+    the API server.
+    """
+    import uuid as _uuid
+    clip_id = str(_uuid.uuid4())
+    ext = (body.filename.rsplit(".", 1)[-1] if "." in body.filename else "mp4").lower()
+    key = f"sources/{user.id}/{clip_id}.{ext}"
+
+    try:
+        upload_url = await r2.get_presigned_upload_url(
+            key=key, content_type=body.content_type, expires_in=900
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    # Public/CDN playback URL if configured, else the S3-style object URL.
+    public_base = getattr(settings, "CLOUDFLARE_R2_PUBLIC_URL", None)
+    video_url = f"{public_base.rstrip('/')}/{key}" if public_base else f"{r2.endpoint}/{r2.bucket}/{key}"
+
+    created = await db.create_clip({
+        "id": clip_id,
+        "user_id": user.id,
+        "pipeline_id": body.pipeline_id,
+        "title": body.title or body.filename,
+        "status": "awaiting_upload",
+        "video_url": video_url,
+        "metadata": {"r2_key": key, "is_source": True},
+    })
+
+    return {
+        "clip_id": created.get("id", clip_id),
+        "upload_url": upload_url,
+        "method": "PUT",
+        "headers": {"Content-Type": body.content_type},
+        "video_url": video_url,
+        "expires_in": 900,
+    }
+
+
+@router.post("/{clip_id}/ingest")
+async def start_ingest(
+    clip_id: str,
+    user = Depends(get_current_user),
+    db: SupabaseService = Depends(get_user_db),
+):
+    """Phase 2 ingest step 2: after the client finishes the PUT, queue processing."""
+    clip = await db.get_clip(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    if clip.get("user_id") != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    await db.update_clip(clip_id, {"status": "queued", "updated_at": "now()"})
+    await queue.enqueue("clip_generation", {
+        "job_id": clip_id,
+        "clip_id": clip_id,
+        "source_id": clip.get("source_id"),
+        "pipeline_id": clip.get("pipeline_id"),
+        "user_id": user.id,
+    })
+    return {"clip_id": clip_id, "status": "queued"}
+
 
 @router.post("/{clip_id}/download-url")
 async def get_download_url(

@@ -45,10 +45,12 @@
 - ✅ **Deps:** `yt-dlp` added to `requirements.in`/`requirements.txt`; `ffmpeg` already in `Dockerfile` + `Dockerfile.worker`; transcription uses the OpenAI Whisper API (no local model needed).
 - ✅ **Worker consumer wired:** fixed the queue mismatch — the worker now listens on `clip_generation` (the queue the clips API writes to; previously unlistened, so queued clips never processed). New `_process_ingest` runs the full pipeline; broken `_process_transcribe` fixed (now extracts audio before transcribing).
 - ✅ **Ingest pipeline (backend):** download source → `extract_audio` → Whisper transcribe → `find_interesting_segments` → `render_segment` per pick → upload → create child clip records (`ready_for_review`); parent status flows `processing → processed`; transcription cost estimated. Orchestration unit-tested with fakes.
-- ⬜ **Upload path:** R2 presigned PUT endpoint so users upload their **own** long-form file (no third-party URL sourcing in the default path).
-- ⬜ **Player:** in-app video player on the clip/variant detail screen (replaces the static `Film` icon) so users can preview variants. *(frontend)*
-- ⬜ **Export / native share:** download + OS share sheet; **no auto-post**. *(frontend)*
-- ⬜ **Pipeline status (UI):** worker now sets `queued/processing/processed/failed`; surface it in the app. *(frontend)*
+- ✅ **Upload path:** `POST /clips/upload-init` mints a presigned R2 PUT URL + creates the source record; `POST /clips/{id}/ingest` queues processing. `R2Service.get_presigned_upload_url` added. Frontend `app/(app)/upload.tsx` (expo-image-picker → presigned PUT via `expo-file-system` → `startIngest`) + home-screen entry button. Users upload their **own** file; no third-party URL sourcing.
+- ✅ **Player:** in-app `expo-av` video player already present on `clip/[id]` (native controls, looping); `Film` shown only when no video.
+- ✅ **Export / native share:** clip detail "Share" action downloads to cache + opens the OS share sheet (`expo-sharing`); replaced the old "Post" button. **No auto-post.**
+- ✅ **Pipeline status (UI):** status pill on the clip screen maps `awaiting_upload/queued/processing/processed/ready_for_review/failed` to label+color; `status` threaded from the API.
+
+**Phase 2 status:** backend spine + frontend upload/player/share/status complete. Remaining before "done": live integration test with real R2 + `OPENAI_API_KEY` set (see `SETUP.md`), and a running worker process.
 
 **Definition of done (Phase 2):** upload own long-form → transcribe → segment → **8 distinct hook+caption variants** → preview in an **actual video player** → export / native share, with measured `cost_usd` shown.
 

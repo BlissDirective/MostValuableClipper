@@ -141,6 +141,14 @@ export default function AppTabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="upload"
+        options={{
+          href: null,
+          headerShown: false,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+      <Tabs.Screen
         name="batch/index"
         options={{
           href: null,

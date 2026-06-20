@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { CheckCircle2, ChevronRight, Eye, Layers, Plus, UserRound, VideoOff, X, Zap } from "lucide-react-native";
+import { CheckCircle2, ChevronRight, Eye, Layers, Plus, UploadCloud, UserRound, VideoOff, X, Zap } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { tokens } from "@/constants/tokens";
@@ -219,6 +219,18 @@ export default function HomeScreen() {
               accessibilityLabel="Open batch jobs"
             >
               <Layers
+                size={tokens.icon.size.md}
+                color={tokens.color.text.secondary}
+                strokeWidth={tokens.icon.stroke.default}
+              />
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/(app)/upload")}
+              hitSlop={12}
+              style={styles.profileBtn}
+              accessibilityLabel="Upload a video"
+            >
+              <UploadCloud
                 size={tokens.icon.size.md}
                 color={tokens.color.text.secondary}
                 strokeWidth={tokens.icon.stroke.default}

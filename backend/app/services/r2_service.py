@@ -125,6 +125,26 @@ class R2Service:
         )
         return url
     
+    async def get_presigned_upload_url(
+        self,
+        key: str,
+        content_type: str = "video/mp4",
+        expires_in: int = 3600,
+    ) -> str:
+        """Get a presigned URL the client can PUT a file directly to (Phase 2 ingest).
+
+        Lets users upload their OWN source video straight to R2 without the bytes
+        passing through the API server.
+        """
+        if not self._use_s3:
+            raise RuntimeError("R2 not configured: need S3 keys or API token")
+
+        return self.client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
+            ExpiresIn=expires_in,
+        )
+
     async def list_objects(self, prefix: Optional[str] = None) -> list:
         """List objects in the bucket."""
         if not self._use_s3:
